@@ -16,13 +16,6 @@
             <span class="indicator-value">{{ healthDisplay }}</span>
           </div>
 
-          <!-- WebSocket Connection -->
-          <div class="indicator" :class="wsClass">
-            <el-icon :size="14"><Connection /></el-icon>
-            <span class="indicator-label">实时连接</span>
-            <span class="indicator-value">{{ wsDisplay }}</span>
-          </div>
-
           <!-- Refresh Button -->
           <el-button
             :icon="Refresh"
@@ -143,7 +136,6 @@ import AgentCard from '../components/AgentCard.vue'
 import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
 import {
   Monitor,
-  Connection,
   Refresh,
   CircleCheck,
   Warning,
@@ -210,16 +202,6 @@ const healthIcon = computed(() => {
   return store.healthStatus === 'healthy' ? CircleCheck : Warning
 })
 
-// WS — real connection status from WebSocket
-const wsDisplay = computed(() => {
-  if (store.wsConnected) return '实时连接'
-  return '已断开'
-})
-const wsClass = computed(() => {
-  if (store.wsConnected) return 'ws-connected'
-  return 'ws-disconnected'
-})
-
 // Actions
 function onAgentDetail(agent: AgentInfo): void {
   selectedAgent.value = agent
@@ -251,7 +233,7 @@ onMounted(() => {
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  box-shadow:0 2px 12px rgba(0, 0, 0, 0.15);
 }
 
 .status-bar-inner {
@@ -323,10 +305,6 @@ onMounted(() => {
 .health-healthy { background: rgba(76, 175, 80, 0.15); color: #81c784; border-color: rgba(76,175,80,0.3) !important; }
 .health-unhealthy { background: rgba(244, 67, 54, 0.15); color: #e57373; border-color: rgba(244,67,54,0.3) !important; }
 .health-unknown { background: rgba(255, 193, 7, 0.15); color: #ffd54f; border-color: rgba(255,193,7,0.3) !important; }
-
-.ws-connected { background: rgba(76, 175, 80, 0.15); color: #81c784; border-color: rgba(76,175,80,0.3) !important; }
-.ws-reconnecting { background: rgba(255, 152, 0, 0.15); color: #ffb74d; border-color: rgba(255,152,0,0.3) !important; }
-.ws-disconnected { background: rgba(158, 158, 158, 0.15); color: #bdbdbd; border-color: rgba(158,158,158,0.3) !important; }
 
 .refresh-btn {
   flex-shrink: 0;
@@ -429,7 +407,7 @@ onMounted(() => {
   background: #0f172a;
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  overflow: hidden;
+  overflow: visible;
   transition: border-color 0.2s;
 }
 
@@ -452,19 +430,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: calc(100vh - 320px);
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #334155 transparent;
-}
-
-.board-column-tasks::-webkit-scrollbar {
-  width: 4px;
-}
-
-.board-column-tasks::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 2px;
 }
 
 /* ==================== RESPONSIVE ==================== */

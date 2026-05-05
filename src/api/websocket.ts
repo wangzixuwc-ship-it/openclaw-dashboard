@@ -99,7 +99,6 @@ class GatewayWebSocket {
 
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      console.log('[GatewayWS] Already connected, skipping')
       return
     }
 
@@ -108,13 +107,11 @@ class GatewayWebSocket {
     this.handshakeDone = false
 
     const url = buildWsUrl()
-    console.log('[GatewayWS] Connecting to:', url)
 
     try {
       this.ws = new WebSocket(url)
 
       this.ws.onopen = () => {
-        console.log('[GatewayWS] WebSocket opened, waiting for server challenge...')
         this.retryCount = 0
       }
 
@@ -126,16 +123,15 @@ class GatewayWebSocket {
           data = { raw: event.data }
         }
 
-        console.log('[GatewayWS] Message:', JSON.stringify(data, null, 2))
 
         // Step 1: Handle connect.challenge from server
         if (data?.type === 'event' && data?.event === 'connect.challenge') {
           const payload = data.payload as Record<string, unknown>
           const nonce = (payload?.nonce as string) || ''
-          console.log('[GatewayWS] Got challenge, nonce:', nonce)
 
-          // Send connect request (token-based auth)
-          // Minimal connect - let gateway validate and tell us what client ID it expects
+          // For browser-based Control UI, use 'gateway-client' as client ID
+          // This is a trusted local client that can omit device identity when authenticating with shared token
+          // See: https://docs.openclaw.ai/gateway/protocol (Trusted same-process backend clients section)
           const connectReq = {
             type: 'req',
             id: `ws-${Date.now()}`,
@@ -143,27 +139,31 @@ class GatewayWebSocket {
             params: {
               minProtocol: 3,
               maxProtocol: 3,
+              client: {
+                id: 'gateway-client',  // Trusted backend client - can omit device on localhost
+                version: '1.0.0',
+                platform: 'web',
+                mode: 'backend',  // Backend mode for gateway-client
+              },
               role: 'operator',
-              scopes: ['operator.read', 'operator.write'],
+              scopes: ['operator.read', 'operator.write', 'operator.admin'],
               auth: { token: getAuthToken() || '' },
             },
           }
-          console.log('[GatewayWS] Sending connect request:', JSON.stringify(connectReq))
           this.send(connectReq)
           return
         }
 
         // Step 2: Handle connect response (hello-ok)
-        if (data?.type === 'res' && data?.id && data?.ok === true) {
-          console.log('[GatewayWS] Handshake successful!')
+        if (data?.type === 'res' && data?.ok === true && data?.payload?.type === 'hello-ok') {
           this.handshakeDone = true
           this.status = 'connected'
           this.startHeartbeat()
           this.handlers.open.forEach((h) => h())
 
-          // Now safe to subscribe to session events
-          console.log('[GatewayWS] Subscribing to sessions...')
-          this.send({ type: 'sessions.subscribe' })
+          // Note: session.state events are NOT currently pushed to WS clients (OpenClaw Issue #17057)
+          // Instead, listen for 'sessions.changed' events (automatically broadcast)
+          // and use sessions.list as fallback for initial state
           return
         }
 
@@ -180,7 +180,17 @@ class GatewayWebSocket {
           return
         }
 
-        // session.state events (authoritative status from gateway)
+        // sessions.changed events (session metadata/state changes - automatically broadcast)
+        // Format: { type: 'event', event: 'sessions.changed', payload: { sessions: [...] } }
+        if (data?.type === 'event' && data?.event === 'sessions.changed') {
+          // Notify handlers - agent.ts will handle the payload
+          const payload = data?.payload as Record<string, unknown>
+          if (payload?.sessions) {
+            this.handlers.message.forEach((h) => h(data))
+          }
+        }
+
+        // session.state events (diagnostic only - may not be pushed, see Issue #17057)
         // Format: { type: 'event', event: 'session.state', key, state, ts, ... }
         if (data?.type === 'event' && data?.event === 'session.state') {
           const key = data.key as string
@@ -202,7 +212,6 @@ class GatewayWebSocket {
       }
 
       this.ws.onclose = (event: CloseEvent) => {
-        console.log('[GatewayWS] Closed:', { code: event.code, reason: event.reason, clean: event.wasClean })
         this.status = 'disconnected'
         this.stopHeartbeat()
         this.handlers.close.forEach((h) => h())
@@ -240,7 +249,6 @@ class GatewayWebSocket {
   send(data: string | Record<string, unknown>): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       const msg = typeof data === 'string' ? data : JSON.stringify(data)
-      console.log('[GatewayWS] Sending:', msg)
       this.ws.send(msg)
     } else {
       console.warn('[GatewayWS] Cannot send — not connected')
@@ -289,7 +297,6 @@ class GatewayWebSocket {
     this.retryCount++
     const delay = this.options.reconnectDelay * Math.pow(this.options.reconnectBackoff, this.retryCount - 1)
     this.status = 'reconnecting'
-    console.log(`[GatewayWS] Reconnecting (${this.retryCount}/${this.options.maxRetries}) in ${delay}ms...`)
 
     this.handlers.reconnect.forEach((h) => h(this.retryCount, this.options.maxRetries))
 

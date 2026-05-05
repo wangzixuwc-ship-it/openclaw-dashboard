@@ -96,6 +96,14 @@ export async function sessionsHistory(sessionKey: string, args: { limit?: number
 }
 
 /**
+ * Get agent definitions (name, id, etc.)
+ * Uses: POST /tools/invoke with tool=agents_list
+ */
+export async function agentsList(): Promise<unknown> {
+  return invokeTool('agents_list', {})
+}
+
+/**
  * Get session status (会话状态)
  * Uses: POST /tools/invoke with tool=session_status
  */

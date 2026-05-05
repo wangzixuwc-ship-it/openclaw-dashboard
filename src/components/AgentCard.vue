@@ -31,14 +31,9 @@
           <span class="meta-value key-value" :title="agent.key">{{ truncateKey }}</span>
         </div>
 
-        <div class="meta-item" v-if="agent.model">
-          <span class="meta-label">模型</span>
-          <span class="meta-value">{{ agent.model }}</span>
-        </div>
-
         <div class="meta-item">
-          <span class="meta-label">运行时长</span>
-          <span class="meta-value duration">{{ formattedDuration }}</span>
+          <span class="meta-label">持续时间</span>
+          <span class="meta-value duration">{{ durationText }}</span>
         </div>
       </div>
 
@@ -101,7 +96,6 @@ import {
   Clock,
   WarningFilled,
   CircleCloseFilled,
-  QuestionFilled,
 } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -141,7 +135,7 @@ const statusIcon = computed(() => {
     case 'idle': return Clock
     case 'error': return WarningFilled
     case 'aborted': return CircleCloseFilled
-    default: return QuestionFilled
+    default: return Clock
   }
 })
 
@@ -156,7 +150,7 @@ const displayStatus = computed(() => {
   return map[props.agent.status] ?? props.agent.status
 })
 
-const formattedDuration = computed(() => {
+const durationText = computed(() => {
   return store.formatDuration(props.agent.elapsedMs)
 })
 
@@ -345,25 +339,58 @@ async function refreshAgent(): Promise<void> {
 .card-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 2px;
-  margin-top: 10px;
-  padding-top: 10px;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--border-color);
 }
 
 .action-btn {
-  padding: 4px 8px;
+  padding: 6px 14px !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  transition: all 0.2s !important;
+  border: 1px solid transparent !important;
+}
+
+/* 刷新按钮 - 中性色 */
+.action-btn:first-child,
+.action-btn:first-child:hover,
+.action-btn:first-child:focus {
+  color: var(--text-secondary) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: var(--border-color) !important;
+}
+.action-btn:first-child:hover {
+  color: var(--text-primary) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--accent) !important;
+}
+
+/* 详情按钮 - 强调色（覆盖 Element Plus type="primary"） */
+.action-btn.el-button--primary,
+.action-btn.el-button--primary:hover,
+.action-btn.el-button--primary:focus {
+  color: #fff !important;
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+.action-btn.el-button--primary:hover {
+  background: var(--accent-hover) !important;
+  box-shadow: 0 2px 8px var(--accent-glow) !important;
 }
 
 /* --- Status Colors --- */
 .status-running { background: rgba(76, 175, 80, 0.15); color: #4caf50; }
 .status-idle { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
 .status-error { background: rgba(244, 67, 54, 0.15); color: #f44336; }
-.status-aborted { background: rgba(158, 158, 158, 0.15); color: #9e9e9e; }
-.status-unknown { background: rgba(158, 158, 158, 0.15); color: #9e9e9e; }
+.status-aborted { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
+.status-unknown { background: rgba(156, 163, 175, 0.15); color: #9ca3af; }
 
 /* --- Text Colors --- */
-.text-success { color: var(--el-color-success); }
-.text-warning { color: var(--el-color-warning); }
-.text-danger { color: var(--el-color-danger); }
+.text-success { color: #4caf50; font-weight: 600; }
+.text-warning { color: #ffc107; font-weight: 600; }
+.text-danger { color: #f44336; font-weight: 600; }
+.text-info { color: #9e9e9e; font-weight: 600; }
 </style>
