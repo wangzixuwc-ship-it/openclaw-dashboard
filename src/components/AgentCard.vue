@@ -4,10 +4,12 @@
     shadow="hover"
     @click="openDrawer"
   >
-    <!-- Header: Name + Status -->
+    <!-- Header: Name + Status Badge -->
     <div class="card-header">
       <div class="agent-identity">
-        <el-icon :size="22" :class="statusColorClass"><UserFilled /></el-icon>
+        <div class="agent-avatar" :class="statusColorClass">
+          <el-icon :size="18"><UserFilled /></el-icon>
+        </div>
         <span class="agent-name" :title="agent.name">{{ agent.name }}</span>
       </div>
       <el-tag
@@ -16,55 +18,59 @@
         size="small"
         class="status-badge"
       >
-        <el-icon><component :is="statusIcon" /></el-icon>
+        <el-icon :size="12"><component :is="statusIcon" /></el-icon>
         {{ displayStatus }}
       </el-tag>
     </div>
 
-    <!-- Body: Key + Duration -->
+    <!-- Body: Metadata + Token -->
     <div class="card-body">
-      <div class="meta-row">
-        <span class="meta-label">会话 ID</span>
-        <span class="meta-value key-value" :title="agent.key">{{ agent.key }}</span>
+      <div class="meta-grid">
+        <div class="meta-item">
+          <span class="meta-label">会话 ID</span>
+          <span class="meta-value key-value" :title="agent.key">{{ truncateKey }}</span>
+        </div>
+
+        <div class="meta-item" v-if="agent.model">
+          <span class="meta-label">模型</span>
+          <span class="meta-value">{{ agent.model }}</span>
+        </div>
+
+        <div class="meta-item">
+          <span class="meta-label">运行时长</span>
+          <span class="meta-value duration">{{ formattedDuration }}</span>
+        </div>
       </div>
 
-      <div class="meta-row" v-if="agent.model">
-        <span class="meta-label">模型</span>
-        <span class="meta-value">{{ agent.model }}</span>
-      </div>
-
-      <div class="meta-row">
-        <span class="meta-label">运行时长</span>
-        <span class="meta-value duration">{{ formattedDuration }}</span>
-      </div>
-
-      <!-- Token Usage Progress -->
+      <!-- Token Usage Progress Bar -->
       <div class="token-section" v-if="agent.tokenUsage">
         <div class="token-header">
           <span class="meta-label">Token 用量</span>
-          <span class="token-text">{{ tokenDisplay }}</span>
+          <span class="token-percent" :class="percentageClass">{{ tokenPercent }}%</span>
         </div>
         <el-progress
           :percentage="agent.tokenUsage.percentage"
           :status="tokenProgressStatus"
-          :stroke-width="8"
+          :stroke-width="6"
           :show-text="false"
+          class="token-progress"
         />
-        <div class="token-bar-labels">
+        <div class="token-detail">
           <span>{{ agent.tokenUsage.current.toLocaleString() }}</span>
-          <span>/</span>
+          <span class="token-sep">/</span>
           <span>{{ agent.tokenUsage.max.toLocaleString() }}</span>
         </div>
       </div>
     </div>
 
-    <!-- Footer: Actions -->
+    <!-- Footer: Action Buttons -->
     <div class="card-footer">
       <el-button
         size="small"
         text
         @click.stop="refreshAgent"
         :loading="refreshing"
+        class="action-btn"
       >
         <el-icon><Refresh /></el-icon>
         刷新
@@ -74,6 +80,7 @@
         text
         type="primary"
         @click.stop="openDrawer"
+        class="action-btn"
       >
         <el-icon><View /></el-icon>
         详情
@@ -108,7 +115,6 @@ const emit = defineEmits<{
 const store = useAgentStore()
 const refreshing = ref(false)
 
-// Computed helpers
 const statusTagType = computed(() => {
   switch (props.agent.status) {
     case 'running': return 'success'
@@ -154,10 +160,8 @@ const formattedDuration = computed(() => {
   return store.formatDuration(props.agent.elapsedMs)
 })
 
-const tokenDisplay = computed(() => {
-  const u = props.agent.tokenUsage
-  if (!u) return ''
-  return `${u.percentage}%`
+const tokenPercent = computed(() => {
+  return props.agent.tokenUsage?.percentage ?? 0
 })
 
 const tokenProgressStatus = computed(() => {
@@ -165,6 +169,18 @@ const tokenProgressStatus = computed(() => {
   if (p >= 90) return 'exception'
   if (p >= 70) return 'warning'
   return 'success'
+})
+
+const percentageClass = computed(() => {
+  const p = props.agent.tokenUsage?.percentage ?? 0
+  if (p >= 90) return 'text-danger'
+  if (p >= 70) return 'text-warning'
+  return 'text-success'
+})
+
+const truncateKey = computed(() => {
+  const key = props.agent.key
+  return key.length > 24 ? key.slice(0, 24) + '…' : key
 })
 
 function openDrawer(): void {
@@ -185,23 +201,28 @@ async function refreshAgent(): Promise<void> {
 .agent-card {
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
 }
 
 .agent-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px var(--accent-glow);
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px var(--accent-glow);
   border-color: var(--accent);
 }
 
+.agent-card :deep(.el-card__body) {
+  padding: 14px;
+}
+
+/* --- Header --- */
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .agent-identity {
@@ -211,9 +232,19 @@ async function refreshAgent(): Promise<void> {
   min-width: 0;
 }
 
+.agent-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 .agent-name {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -224,30 +255,40 @@ async function refreshAgent(): Promise<void> {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  border-radius: 6px;
+  padding: 0 8px;
 }
 
+/* --- Body --- */
 .card-body {
   font-size: 13px;
 }
 
-.meta-row {
+.meta-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.meta-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
+  padding: 3px 0;
 }
 
 .meta-label {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
 }
 
 .meta-value {
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   text-align: right;
   max-width: 60%;
   overflow: hidden;
@@ -257,15 +298,16 @@ async function refreshAgent(): Promise<void> {
 
 .key-value {
   font-family: 'Cascadia Code', 'Fira Code', monospace;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .duration {
   font-variant-numeric: tabular-nums;
 }
 
+/* --- Token Section --- */
 .token-section {
-  margin-top: 12px;
+  margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--border-color);
 }
@@ -277,33 +319,51 @@ async function refreshAgent(): Promise<void> {
   margin-bottom: 6px;
 }
 
-.token-text {
+.token-percent {
   font-weight: 600;
   font-size: 13px;
-  color: var(--text-primary);
 }
 
-.token-bar-labels {
+.token-progress {
+  margin-bottom: 2px;
+}
+
+.token-detail {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-secondary);
   margin-top: 2px;
 }
 
+.token-sep {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+/* --- Footer --- */
 .card-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 4px;
-  margin-top: 12px;
+  gap: 2px;
+  margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--border-color);
 }
 
-/* Status colors for icons */
-.status-running { color: var(--el-color-success); }
-.status-idle { color: var(--el-color-warning); }
-.status-error { color: var(--el-color-danger); }
-.status-aborted { color: var(--el-color-info); }
-.status-unknown { color: var(--el-text-color-secondary); }
+.action-btn {
+  padding: 4px 8px;
+}
+
+/* --- Status Colors --- */
+.status-running { background: rgba(76, 175, 80, 0.15); color: #4caf50; }
+.status-idle { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
+.status-error { background: rgba(244, 67, 54, 0.15); color: #f44336; }
+.status-aborted { background: rgba(158, 158, 158, 0.15); color: #9e9e9e; }
+.status-unknown { background: rgba(158, 158, 158, 0.15); color: #9e9e9e; }
+
+/* --- Text Colors --- */
+.text-success { color: var(--el-color-success); }
+.text-warning { color: var(--el-color-warning); }
+.text-danger { color: var(--el-color-danger); }
 </style>

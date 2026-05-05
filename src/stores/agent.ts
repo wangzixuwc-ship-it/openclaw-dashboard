@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { sessionsList, sessionStatus, health, sessionsHistory } from '../api/gateway'
-import { useGatewayWebSocket } from '../api/websocket'
+import { useGatewayWebSocket, type SessionStateEvent } from '../api/websocket'
 
 export type AgentStatus = 'idle' | 'running' | 'error' | 'aborted' | 'unknown'
 
@@ -98,6 +98,57 @@ export const useAgentStore = defineStore('agent', () => {
     filterStatus.value = status
   }
 
+  // WebSocket instance for real-time session state updates
+  const ws = useGatewayWebSocket()
+  let wsInitialized = false
+
+  /**
+   * Initialize WebSocket listeners for session.state events.
+   * Called once on first subscribeAgents() call.
+   */
+  function initWsListeners(): void {
+    if (wsInitialized) return
+    wsInitialized = true
+
+    ws.onSessionState((event: SessionStateEvent) => {
+      // Map gateway state to our AgentStatus
+      let status: AgentStatus = 'unknown'
+      switch (event.state) {
+        case 'processing':
+          status = 'running'
+          break
+        case 'waiting':
+          // Could be queue waiting — treat as running
+          status = 'running'
+          break
+        case 'idle':
+          status = 'idle'
+          break
+        default:
+          // Unknown state — keep current status
+          return
+      }
+
+      // Update the agent in the list
+      const index = agents.value.findIndex((a) => a.key === event.key)
+      if (index >= 0) {
+        agents.value[index] = { ...agents.value[index], status }
+      }
+    })
+
+    ws.onOpen(() => {
+      wsConnected.value = true
+    })
+
+    ws.onClose(() => {
+      wsConnected.value = false
+    })
+
+    ws.onError(() => {
+      wsConnected.value = false
+    })
+  }
+
   // Actions
 
   /**
@@ -132,54 +183,46 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  // Fallback polling interval (slow poll as safety net alongside WebSocket)
+  let pollingInterval: ReturnType<typeof setInterval> | null = null
+  const FALLBACK_POLL_MS = 30000 // 30 seconds — only as fallback
+
   /**
-   * Subscribe to agent changes via WebSocket
+   * Subscribe to agent changes:
+   * 1) Initial HTTP fetch for immediate data
+   * 2) WebSocket for real-time session.state updates
+   * 3) Slow HTTP poll as fallback if WS drops
    */
   function subscribeAgents(): void {
-    const ws = useGatewayWebSocket()
+    // Initial HTTP fetch
+    fetchAgents()
+    fetchHealth()
 
-    ws.onOpen(() => {
-      wsConnected.value = true
-    })
+    // Initialize WebSocket listeners (once)
+    initWsListeners()
 
-    ws.onClose(() => {
-      wsConnected.value = false
-    })
-
-    ws.onMessage((event) => {
-      // Handle session change events
-      if (event?.type === 'session:changed' || event?.type === 'sessions:changed') {
-        if (event?.data) {
-          // Full list replacement
-          if (Array.isArray(event.data)) {
-            agents.value = event.data.map((item) => normalizeAgent(item as Record<string, unknown>))
-          } else if (typeof event.data === 'object' && event.data !== null) {
-            const typed = event.data as Record<string, unknown>
-            if (Array.isArray(typed.sessions)) {
-              agents.value = typed.sessions.map((item) => normalizeAgent(item as Record<string, unknown>))
-            } else {
-              // Single agent update — merge into existing list
-              const updatedAgent = normalizeAgent(typed)
-              const index = agents.value.findIndex((a) => a.key === updatedAgent.key)
-              if (index >= 0) {
-                agents.value[index] = updatedAgent
-              } else {
-                agents.value.push(updatedAgent)
-              }
-            }
-          }
-        } else {
-          // Fallback — refresh from HTTP
-          fetchAgents()
-        }
-      }
-    })
-
-    ws.onError((err) => {
-      console.warn('[AgentStore] WebSocket error:', err)
-    })
-
+    // Connect WebSocket (auto-subscribes to sessions.subscribe on open)
     ws.connect()
+
+    // Fallback: slow HTTP poll in case WS fails
+    pollingInterval = setInterval(() => {
+      if (ws.is !== 'connected') {
+        // WS down — refresh via HTTP
+        fetchAgents()
+      }
+    }, FALLBACK_POLL_MS)
+  }
+
+  /**
+   * Unsubscribe from agent updates
+   */
+  function unsubscribeAgents(): void {
+    if (pollingInterval) {
+      clearInterval(pollingInterval)
+      pollingInterval = null
+    }
+    ws.disconnect()
+    wsInitialized = false
   }
 
   /**
@@ -194,7 +237,11 @@ export const useAgentStore = defineStore('agent', () => {
       }
       const status = (data as Record<string, unknown>).status
       const healthy = (data as Record<string, unknown>).healthy
-      healthStatus.value = status === 'ok' || status === 'healthy' || healthy === true ? 'healthy' : 'unhealthy'
+      const ok = (data as Record<string, unknown>).ok
+      healthStatus.value =
+        status === 'ok' || status === 'healthy' || status === 'live' || healthy === true || ok === true
+          ? 'healthy'
+          : 'unhealthy'
     } catch {
       healthStatus.value = 'unhealthy'
     }
@@ -256,6 +303,61 @@ export const useAgentStore = defineStore('agent', () => {
     const str = (v: unknown): string => (typeof v === 'string' ? v : '')
     const num = (v: unknown): number => (typeof v === 'number' ? v : 0)
 
+    const rawKey = str(item.key ?? item.sessionKey ?? item.id)
+
+    // Extract agent name from key: "agent:recorder:main" -> "recorder"
+    let agentName = str(item.label) || str(item.name)
+    if (!agentName) {
+      // Check for cron sessions
+      if (rawKey.includes('cron:')) {
+        const cronMatch = rawKey.match(/cron:(.+?)$/)
+        agentName = cronMatch ? 'Cron: ' + cronMatch[1] : '定时任务'
+      } else {
+        // Extract from key: agent:<agentId>:<type>[:<subId>]
+        const parts = rawKey.split(':')
+        if (parts.length >= 3) {
+          agentName = parts[1] // agentId
+        } else {
+          agentName = rawKey
+        }
+      }
+    }
+
+    // Derive status from available fields
+    // Note: API returns Python-style booleans as strings: "True"/"False" or actual booleans
+    let derivedStatus: AgentStatus = 'idle'
+    const abortedRaw = String(item.abortedLastRun ?? '').toLowerCase()
+    const systemSentRaw = String(item.systemSent ?? '').toLowerCase()
+    const aborted = abortedRaw === 'true' || item.abortedLastRun === true
+    const systemSent = systemSentRaw === 'true' || item.systemSent === true
+    const updatedAt = num(item.updatedAt)
+
+     if (aborted) {
+       derivedStatus = 'aborted'
+     } else if (systemSent && updatedAt > 0) {
+       // systemSent=true means the agent has been initialized and is (or was) active.
+       // The only reliable signal for "still running" is whether updatedAt is recent.
+       // However, updatedAt only refreshes when output is produced; a running agent
+       // thinking without output will appear stale. Use a more generous threshold:
+       // < 120s → running, < 600s → idle (likely still processing), ≥ 600s → idle.
+       const secondsSinceUpdate = (Date.now() - updatedAt) / 1000
+       if (secondsSinceUpdate < 120) {
+         derivedStatus = 'running'
+       } else if (secondsSinceUpdate < 600) {
+         // Still within a window where the agent could be processing;
+         // trust systemSent and keep it as running to avoid false idle.
+         derivedStatus = 'running'
+       } else {
+         derivedStatus = 'idle'
+       }
+     }
+
+    // Use explicit status if available
+    const explicitStatus = str(item.status) as AgentStatus
+    if (explicitStatus && explicitStatus !== 'unknown') {
+      derivedStatus = explicitStatus
+    }
+
     // Extract token usage from context/usage object
     const contextRaw = item.context ?? item.contextWindow ?? item.usage
     let tokenUsage: TokenUsage | undefined
@@ -282,11 +384,18 @@ export const useAgentStore = defineStore('agent', () => {
     if (elapsedVal > 0) {
       elapsedMs = elapsedVal
     }
+    // Fallback: use updatedAt timestamp to compute elapsedMs when startedAt/elapsedMs are missing
+    if (!elapsedMs || elapsedMs <= 0) {
+      const updatedAt = num(item.updatedAt)
+      if (updatedAt > 0) {
+        elapsedMs = Date.now() - updatedAt
+      }
+    }
 
     return {
-      key: str(item.key ?? item.sessionKey ?? item.id),
-      name: str(item.name ?? item.label ?? item.key ?? item.sessionKey ?? item.id) || 'Unnamed',
-      status: (str(item.status) as AgentStatus) || 'unknown',
+      key: rawKey,
+      name: agentName || 'Unnamed',
+      status: derivedStatus,
       lastActivity: str(item.lastActivity ?? item.lastSeen ?? item.updatedAt) || undefined,
       createdAt: str(item.startedAt ?? item.createdAt ?? item.created) || undefined,
       model: str(item.model ?? item.modelName ?? item.modelId) || undefined,
@@ -316,6 +425,7 @@ export const useAgentStore = defineStore('agent', () => {
     // Actions
     fetchAgents,
     subscribeAgents,
+    unsubscribeAgents,
     fetchHealth,
     fetchAgentStatus,
     fetchSessionHistory,
