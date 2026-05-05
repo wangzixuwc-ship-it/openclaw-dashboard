@@ -5,7 +5,7 @@
       <div class="status-bar-inner">
         <div class="brand">
           <el-icon :size="24" class="brand-icon"><Monitor /></el-icon>
-          <h1 class="brand-title">OpenClaw 控制台</h1>
+          <h1 class="brand-title">OpenClaw 监控台</h1>
         </div>
 
         <div class="status-indicators">
@@ -52,30 +52,8 @@
       </div>
     </section>
 
-    <!-- ========= 3. 看板主体（3列：运行中/空闲/错误） ========= -->
+    <!-- ========= 3. 看板主体（5列：空闲/运行中/已终止/错误/未知） ========= -->
     <main class="board-container">
-      <!-- 运行中列 -->
-      <div class="board-column board-column-running">
-        <div class="board-column-header" style="border-bottom-color: #3b82f6;">
-          <span style="color: #3b82f6; font-weight: 700; font-size: 13px;">
-            <el-icon><VideoPlay /></el-icon>
-            运行中
-          </span>
-          <el-tag size="small" style="background: rgba(59,130,246,0.15); color: #3b82f6; border-color: #3b82f6;">
-            {{ store.runningAgents.length }} 个
-          </el-tag>
-        </div>
-        <div class="board-column-tasks" v-loading="store.loading && store.agents.length === 0">
-          <AgentCard
-            v-for="agent in store.runningAgents"
-            :key="agent.key"
-            :agent="agent"
-            @detail="onAgentDetail"
-          />
-          <el-empty v-if="store.runningAgents.length === 0 && !store.loading" description="暂无运行中的 Agent" :image-size="50" />
-        </div>
-      </div>
-
       <!-- 空闲列 -->
       <div class="board-column board-column-idle">
         <div class="board-column-header" style="border-bottom-color: #f59e0b;">
@@ -87,14 +65,58 @@
             {{ store.idleAgents.length }} 个
           </el-tag>
         </div>
-        <div class="board-column-tasks">
+        <div class="board-column-tasks" v-loading="store.loading && store.agents.length === 0">
           <AgentCard
             v-for="agent in store.idleAgents"
             :key="agent.key"
             :agent="agent"
             @detail="onAgentDetail"
           />
-          <el-empty v-if="store.idleAgents.length === 0" description="暂无空闲的 Agent" :image-size="50" />
+          <el-empty v-if="store.idleAgents.length === 0 && !store.loading" description="暂无空闲的 Agent" :image-size="50" />
+        </div>
+      </div>
+
+      <!-- 运行中列 -->
+      <div class="board-column board-column-running">
+        <div class="board-column-header" style="border-bottom-color: #3b82f6;">
+          <span style="color: #3b82f6; font-weight: 700; font-size: 13px;">
+            <el-icon><VideoPlay /></el-icon>
+            运行中
+          </span>
+          <el-tag size="small" style="background: rgba(59,130,246,0.15); color: #3b82f6; border-color: #3b82f6;">
+            {{ store.runningAgents.length }} 个
+          </el-tag>
+        </div>
+        <div class="board-column-tasks">
+          <AgentCard
+            v-for="agent in store.runningAgents"
+            :key="agent.key"
+            :agent="agent"
+            @detail="onAgentDetail"
+          />
+          <el-empty v-if="store.runningAgents.length === 0" description="暂无运行中的 Agent" :image-size="50" />
+        </div>
+      </div>
+
+      <!-- 已终止列 -->
+      <div class="board-column board-column-aborted">
+        <div class="board-column-header" style="border-bottom-color: #6b7280;">
+          <span style="color: #6b7280; font-weight: 700; font-size: 13px;">
+            <el-icon><CircleClose /></el-icon>
+            已终止
+          </span>
+          <el-tag size="small" style="background: rgba(107,114,128,0.15); color: #6b7280; border-color: #6b7280;">
+            {{ store.abortedAgents.length }} 个
+          </el-tag>
+        </div>
+        <div class="board-column-tasks">
+          <AgentCard
+            v-for="agent in store.abortedAgents"
+            :key="agent.key"
+            :agent="agent"
+            @detail="onAgentDetail"
+          />
+          <el-empty v-if="store.abortedAgents.length === 0" description="暂无已终止的 Agent" :image-size="50" />
         </div>
       </div>
 
@@ -117,6 +139,28 @@
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.errorAgents.length === 0" description="暂无错误的 Agent" :image-size="50" />
+        </div>
+      </div>
+
+      <!-- 未知列 -->
+      <div class="board-column board-column-unknown">
+        <div class="board-column-header" style="border-bottom-color: #9ca3af;">
+          <span style="color: #9ca3af; font-weight: 700; font-size: 13px;">
+            <el-icon><QuestionFilled /></el-icon>
+            未知
+          </span>
+          <el-tag size="small" style="background: rgba(156,163,175,0.15); color: #9ca3af; border-color: #9ca3af;">
+            {{ store.unknownAgents.length }} 个
+          </el-tag>
+        </div>
+        <div class="board-column-tasks">
+          <AgentCard
+            v-for="agent in store.unknownAgents"
+            :key="agent.key"
+            :agent="agent"
+            @detail="onAgentDetail"
+          />
+          <el-empty v-if="store.unknownAgents.length === 0" description="暂无未知状态的 Agent" :image-size="50" />
         </div>
       </div>
     </main>
@@ -143,6 +187,7 @@ import {
   VideoPlay,
   VideoPause,
   CircleClose,
+  Money,
 } from '@element-plus/icons-vue'
 
 const store = useAgentStore()
@@ -175,11 +220,39 @@ const statsCards = computed(() => [
     class: 'stat-idle',
   },
   {
+    label: '已终止',
+    value: store.abortedAgents.length,
+    icon: CircleClose,
+    iconClass: 'icon-gray',
+    class: 'stat-aborted',
+  },
+  {
     label: '错误',
     value: store.errorAgents.length,
     icon: CircleClose,
     iconClass: 'icon-red',
     class: 'stat-error',
+  },
+  {
+    label: '运行时间',
+    value: store.formatUptime(store.uptimeMs),
+    icon: Monitor,
+    iconClass: 'icon-purple',
+    class: 'stat-uptime',
+  },
+  {
+    label: '总Token',
+    value: (store.totalTokensUsed || 0).toLocaleString(),
+    icon: Odometer,
+    iconClass: 'icon-orange',
+    class: 'stat-tokens',
+  },
+  {
+    label: '总费用',
+    value: store.formatCost(store.totalCostCny),
+    icon: Money,
+    iconClass: 'icon-green',
+    class: 'stat-cost',
   },
 ])
 
@@ -378,10 +451,13 @@ onMounted(() => {
   letter-spacing: 0.5px;
 }
 
-.icon-blue { background: rgba(66, 165, 245, 0.15); color: #42a5f5; }
-.icon-green { background: rgba(76, 175, 80, 0.15); color: #4caf50; }
-.icon-yellow { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
-.icon-red { background: rgba(244, 67, 54, 0.15); color: #f44336; }
+ .icon-blue { background: rgba(66, 165, 245, 0.15); color: #42a5f5; }
+ .icon-green { background: rgba(76, 175, 80, 0.15); color: #4caf50; }
+ .icon-yellow { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
+ .icon-red { background: rgba(244, 67, 54, 0.15); color: #f44336; }
+ .icon-gray { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
+ .icon-purple { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
+ .icon-orange { background: rgba(249, 115, 22, 0.15); color: #f97316; }
 
 .stat-total { border-left: 3px solid #42a5f5; }
 .stat-running { border-left: 3px solid #4caf50; }

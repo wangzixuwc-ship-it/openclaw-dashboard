@@ -19,6 +19,7 @@ export interface AgentInfo {
   tokenUsage?: TokenUsage
   details?: Record<string, unknown>
   elapsedMs?: number
+  model?: string  // Add model field for cost calculation
 }
 
 // Agent name mapping (from openclaw.json)
@@ -55,9 +56,11 @@ export type FilterStatus = 'all' | 'running' | 'idle' | 'error' | 'aborted'
 export const useAgentStore = defineStore('agent', () => {
   // State
   const agents = ref<AgentInfo[]>([])
+  const allSessionsRaw = ref<Record<string, unknown>[]>([]) // Store raw sessions for global stats
   const loading = ref(false)
   const error = ref<string | null>(null)
   const healthStatus = ref<AgentState['healthStatus']>('unknown')
+  const now = ref(Date.now()) // Reactive "now" that ticks every second for uptime display
 
   // Getters
   const agentCount = computed(() => agents.value.length)
@@ -66,6 +69,35 @@ export const useAgentStore = defineStore('agent', () => {
   const errorAgents = computed(() => agents.value.filter((a) => a.status === 'error'))
   const abortedAgents = computed(() => agents.value.filter((a) => a.status === 'aborted'))
   const unknownAgents = computed(() => agents.value.filter((a) => a.status === 'unknown'))
+
+  // Uptime: use oldest session's updatedAt as reference (when openclaw started)
+  // We stored updatedAt (numeric timestamp) in lastActivity during normalizeAgent
+  const oldestSessionTime = computed(() => {
+    if (agents.value.length === 0) return 0
+    const times = agents.value
+      .map((a) => a.lastActivity || 0) // lastActivity is numeric timestamp (ms)
+      .filter((t) => t > 0)
+    if (times.length === 0) return 0
+    return Math.min(...times)
+  })
+
+  const uptimeMs = computed(() => {
+    if (oldestSessionTime.value === 0) return 0
+    return now.value - oldestSessionTime.value
+  })
+
+  function formatUptime(ms: number): string {
+    if (ms <= 0) return '未知'
+    const seconds = Math.floor(ms / 1000)
+    const minutes = Math.floor(seconds / 60)
+    const hours = Math.floor(minutes / 60)
+    const days = Math.floor(hours / 24)
+    
+    if (days > 0) return `${days}天${hours % 24}小时`
+    if (hours > 0) return `${hours}小时${minutes % 60}分`
+    if (minutes > 0) return `${minutes}分${seconds % 60}秒`
+    return `${seconds}秒`
+  }
 
   const isHealthy = computed(() => healthStatus.value === 'healthy')
 
@@ -151,44 +183,53 @@ export const useAgentStore = defineStore('agent', () => {
       agentName = str(item.label) || str(item.name) || rawKey || 'Unnamed'
     }
 
-    // Derive status
-    let derivedStatus: AgentStatus = 'idle'
-    const abortedRaw = String(item.abortedLastRun ?? '').toLowerCase()
-    const systemSentRaw = String(item.systemSent ?? '').toLowerCase()
-    const aborted = abortedRaw === 'true' || item.abortedLastRun === true
-    const systemSent = systemSentRaw === 'true' || item.systemSent === true
-    const updatedAt = num(item.updatedAt)
+    // Get status: API does NOT return a 'status' field
+    // Must derive from: abortedLastRun, updatedAt
+    // Logic: abortedLastRun=true → aborted; recently updated → running; else → idle
+    let derivedStatus: AgentStatus = 'unknown'
 
+    // 1) Check if aborted (most reliable)
+    const abortedRaw = String(item.abortedLastRun ?? '').toLowerCase()
+    const aborted = abortedRaw === 'true' || item.abortedLastRun === true
     if (aborted) {
       derivedStatus = 'aborted'
-    } else if (systemSent && updatedAt > 0) {
-      const secondsSinceUpdate = (Date.now() - updatedAt) / 1000
-      if (secondsSinceUpdate < 120) {
-        derivedStatus = 'running'
-      } else if (secondsSinceUpdate < 600) {
-        derivedStatus = 'running'
+    } else {
+      // 2) Use updatedAt to determine running vs idle
+      const updatedAt = num(item.updatedAt)
+      if (updatedAt > 0) {
+        const secondsSinceUpdate = (Date.now() - updatedAt) / 1000
+        // Consider "running" if updated in last 10 minutes (600 seconds)
+        derivedStatus = secondsSinceUpdate < 600 ? 'running' : 'idle'
       } else {
-        derivedStatus = 'idle'
+        // No updatedAt at all
+        derivedStatus = 'unknown'
       }
     }
 
-    const explicitStatus = str(item.status) as AgentStatus
-    if (explicitStatus && explicitStatus !== 'unknown') {
-      derivedStatus = explicitStatus
-    }
-
-    // Token usage
-    const contextRaw = item.context ?? item.contextWindow ?? item.usage
+    // Token usage - API returns: totalTokens (used), contextTokens (max)
+    const totalTokens = num(item.totalTokens)
+    const contextTokens = num(item.contextTokens)
     let tokenUsage: TokenUsage | undefined
-    if (contextRaw && typeof contextRaw === 'object') {
-      const ctx = contextRaw as Record<string, unknown>
-      const current = num(ctx.currentTokens ?? ctx.tokensUsed ?? 0)
-      const max = num(ctx.maxTokens ?? ctx.maxContext ?? ctx.contextWindow ?? 1)
-      if (max > 0) {
-        tokenUsage = {
-          current,
-          max,
-          percentage: Math.round((current / max) * 100),
+    
+    if (totalTokens > 0 && contextTokens > 0) {
+      tokenUsage = {
+        current: totalTokens,
+        max: contextTokens,
+        percentage: Math.round((totalTokens / contextTokens) * 100),
+      }
+    } else {
+      // Fallback: check details/metadata
+      const contextRaw = item.context ?? item.contextWindow ?? item.usage
+      if (contextRaw && typeof contextRaw === 'object') {
+        const ctx = contextRaw as Record<string, unknown>
+        const current = num(ctx.currentTokens ?? ctx.tokensUsed ?? ctx.totalTokens ?? 0)
+        const max = num(ctx.maxTokens ?? ctx.maxContext ?? ctx.contextWindow ?? ctx.contextTokens ?? 1)
+        if (max > 0 && current > 0) {
+          tokenUsage = {
+            current,
+            max,
+            percentage: Math.round((current / max) * 100),
+          }
         }
       }
     }
@@ -214,11 +255,12 @@ export const useAgentStore = defineStore('agent', () => {
       key: rawKey,
       name: agentName,
       status: derivedStatus,
-      lastActivity: str(item.lastActivity ?? item.lastSeen ?? item.updatedAt) || undefined,
+      lastActivity: num(item.updatedAt) || undefined, // Store as numeric timestamp for uptime calculation
       createdAt: str(item.startedAt ?? item.createdAt ?? item.created) || undefined,
       tokenUsage,
       elapsedMs,
       details: (item.details ?? item.metadata) as Record<string, unknown> | undefined,
+      model: str(item.model) || undefined,
     }
   }
 
@@ -228,20 +270,41 @@ export const useAgentStore = defineStore('agent', () => {
     loading.value = true
     error.value = null
     try {
+      // Do NOT pass activeMinutes - let API return default recent sessions
       const data = await sessionsList()
-      if (Array.isArray(data)) {
-        agents.value = data.map((item: unknown) => normalizeAgent(item as Record<string, unknown>))
-      } else if (data && typeof data === 'object') {
-        const typed = data as Record<string, unknown>
-        if (Array.isArray(typed.sessions)) {
-          agents.value = typed.sessions.map((item) => normalizeAgent(item as Record<string, unknown>))
-        } else if (Array.isArray(typed.data)) {
-          agents.value = typed.data.map((item) => normalizeAgent(item as Record<string, unknown>))
-        } else {
-          agents.value = [normalizeAgent(typed)]
+      // Debug: log raw API response
+      console.log('[AgentStore] Raw API response:', data)
+
+      // After interceptor, data is typically { count, sessions } (i.e., result.details)
+      // Save ALL raw sessions for global stats
+      const raw = data as Record<string, unknown>
+      const rawSessions = (() => {
+        // Case 1: data is already { count, sessions } (interceptor unwrapped result.details)
+        if (Array.isArray(raw.sessions)) return raw.sessions as Record<string, unknown>[]
+        // Case 2: data has details.sessions
+        if (raw.details && typeof raw.details === 'object') {
+          const d = raw.details as Record<string, unknown>
+          if (Array.isArray(d.sessions)) return d.sessions as Record<string, unknown>[]
         }
+        // Case 3: data is an array directly
+        if (Array.isArray(data)) return data as Record<string, unknown>[]
+        return []
+      })()
+      allSessionsRaw.value = rawSessions
+      console.log('[AgentStore] Total sessions (raw):', rawSessions.length)
+
+      // Normalize into agents
+      if (Array.isArray(raw.sessions)) {
+        agents.value = (raw.sessions as Record<string, unknown>[]).map((item) => normalizeAgent(item))
+      } else if (raw.details && typeof raw.details === 'object') {
+        const d = raw.details as Record<string, unknown>
+        if (Array.isArray(d.sessions)) {
+          agents.value = (d.sessions as Record<string, unknown>[]).map((item) => normalizeAgent(item))
+        }
+      } else if (Array.isArray(data)) {
+        agents.value = (data as unknown[]).map((item) => normalizeAgent(item as Record<string, unknown>))
       } else {
-        agents.value = [normalizeAgent({})]
+        agents.value = [normalizeAgent(raw)]
       }
     } catch (e) {
       error.value = (e instanceof Error ? e.message : String(e)) || 'Failed to fetch agents'
@@ -252,21 +315,31 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   let pollingInterval: ReturnType<typeof setInterval> | null = null
+  let uptimeTimer: ReturnType<typeof setInterval> | null = null
   const POLL_MS = 30000
 
   function subscribeAgents(): void {
     fetchAgents()
     fetchHealth()
     if (pollingInterval) clearInterval(pollingInterval)
+    if (uptimeTimer) clearInterval(uptimeTimer)
     pollingInterval = setInterval(() => {
       fetchAgents()
     }, POLL_MS)
+    // Update 'now' every second so uptime display refreshes
+    uptimeTimer = setInterval(() => {
+      now.value = Date.now()
+    }, 1000)
   }
 
   function unsubscribeAgents(): void {
     if (pollingInterval) {
       clearInterval(pollingInterval)
       pollingInterval = null
+    }
+    if (uptimeTimer) {
+      clearInterval(uptimeTimer)
+      uptimeTimer = null
     }
   }
 
@@ -332,6 +405,35 @@ export const useAgentStore = defineStore('agent', () => {
     return `${hours}h ${minutes % 60}m`
   }
 
+  // Total token consumption - sum ALL sessions' totalTokens (from raw API data)
+  const totalTokensUsed = computed(() => {
+    return allSessionsRaw.value.reduce((sum, s) => {
+      const t = Number((s as Record<string, unknown>).totalTokens)
+      return sum + (isNaN(t) ? 0 : t)
+    }, 0)
+  })
+
+  // Total cost estimate (CNY) = token cost + electricity
+  // Token cost: ¥12 per 1M tokens; Electricity: ¥2 per hour of uptime
+  const CNY_PER_MILLION_TOKENS = 12
+  const ELECTRICITY_PER_HOUR = 2
+
+  const totalCostCny = computed(() => {
+    // Token cost
+    const totalTokens = totalTokensUsed.value
+    const tokenCost = totalTokens > 0 ? (totalTokens / 1000000) * CNY_PER_MILLION_TOKENS : 0
+    // Electricity cost: uptime hours * 2
+    const uptimeHours = uptimeMs.value / (1000 * 60 * 60)
+    const electricityCost = uptimeHours * ELECTRICITY_PER_HOUR
+    return tokenCost + electricityCost
+  })
+
+  function formatCost(cny: number): string {
+    if (cny <= 0) return '¥0.00'
+    if (cny < 0.01) return '<¥0.01'
+    return '¥' + cny.toFixed(2)
+  }
+
   return {
     // State
     agents,
@@ -347,6 +449,10 @@ export const useAgentStore = defineStore('agent', () => {
     unknownAgents,
     isHealthy,
     filteredAgents,
+    oldestSessionTime,
+    uptimeMs,
+    totalTokensUsed,
+    totalCostCny,
     // Actions
     fetchAgents,
     subscribeAgents,
@@ -358,5 +464,7 @@ export const useAgentStore = defineStore('agent', () => {
     setSearchQuery,
     setFilterStatus,
     formatDuration,
+    formatUptime,
+    formatCost,
   }
 })

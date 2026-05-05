@@ -57,30 +57,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Footer: Action Buttons -->
-    <div class="card-footer">
-      <el-button
-        size="small"
-        text
-        @click.stop="refreshAgent"
-        :loading="refreshing"
-        class="action-btn"
-      >
-        <el-icon><Refresh /></el-icon>
-        刷新
-      </el-button>
-      <el-button
-        size="small"
-        text
-        type="primary"
-        @click.stop="openDrawer"
-        class="action-btn"
-      >
-        <el-icon><View /></el-icon>
-        详情
-      </el-button>
-    </div>
   </el-card>
 </template>
 
