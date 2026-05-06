@@ -212,10 +212,19 @@ export const useAgentStore = defineStore('agent', () => {
       const updatedAt = num(item.updatedAt)
       if (updatedAt > 0) {
         const secondsSinceUpdate = (Date.now() - updatedAt) / 1000
-        // Cron sessions: idle if no update in 1 minute (60 seconds)
-        // Regular sessions: idle if no update in 5 minutes (300 seconds)
-        const idleThreshold = rawKey.includes(':cron:') ? 60 : 300
-        derivedStatus = secondsSinceUpdate < idleThreshold ? 'running' : 'idle'
+        // Special agents (副总, 执行秘书, 定时器) use normal idle threshold
+        // Other agents: always running (no idle state)
+        const isSpecialAgent = agentName === '副总' || agentName === '执行秘书'
+        const isCronAgent = rawKey.includes(':cron:')
+        
+        if (isSpecialAgent || isCronAgent) {
+          // Normal behavior for special agents
+          const idleThreshold = isCronAgent ? 60 : 300
+          derivedStatus = secondsSinceUpdate < idleThreshold ? 'running' : 'idle'
+        } else {
+          // Other agents: always running unless aborted/error/unknown
+          derivedStatus = 'running'
+        }
       } else {
         // No updatedAt at all
         derivedStatus = 'unknown'
