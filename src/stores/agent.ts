@@ -212,8 +212,10 @@ export const useAgentStore = defineStore('agent', () => {
       const updatedAt = num(item.updatedAt)
       if (updatedAt > 0) {
         const secondsSinceUpdate = (Date.now() - updatedAt) / 1000
-        // Consider "running" if updated in last 5 minutes (300 seconds)
-        derivedStatus = secondsSinceUpdate < 300 ? 'running' : 'idle'
+        // Cron sessions: idle if no update in 1 minute (60 seconds)
+        // Regular sessions: idle if no update in 5 minutes (300 seconds)
+        const idleThreshold = rawKey.includes(':cron:') ? 60 : 300
+        derivedStatus = secondsSinceUpdate < idleThreshold ? 'running' : 'idle'
       } else {
         // No updatedAt at all
         derivedStatus = 'unknown'
