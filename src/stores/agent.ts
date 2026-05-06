@@ -212,8 +212,8 @@ export const useAgentStore = defineStore('agent', () => {
       const updatedAt = num(item.updatedAt)
       if (updatedAt > 0) {
         const secondsSinceUpdate = (Date.now() - updatedAt) / 1000
-        // Consider "running" if updated in last 10 minutes (600 seconds)
-        derivedStatus = secondsSinceUpdate < 600 ? 'running' : 'idle'
+        // Consider "running" if updated in last 5 minutes (300 seconds)
+        derivedStatus = secondsSinceUpdate < 300 ? 'running' : 'idle'
       } else {
         // No updatedAt at all
         derivedStatus = 'unknown'

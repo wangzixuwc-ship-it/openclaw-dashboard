@@ -289,8 +289,8 @@ const isCronSession = computed(() => {
 })
 
 const drawerAvatarIcon = computed(() => {
-  if (isSpecialAgent.value) return Avatar
   if (isCronSession.value) return Timer
+  if (isSpecialAgent.value) return Avatar
   return UserFilled
 })
 
