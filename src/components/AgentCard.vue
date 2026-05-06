@@ -8,7 +8,7 @@
     <div class="card-header">
       <div class="agent-identity">
         <div class="agent-avatar" :class="statusColorClass">
-          <el-icon :size="18"><UserFilled /></el-icon>
+          <el-icon :size="18"><component :is="avatarIcon" /></el-icon>
         </div>
         <span class="agent-name" :title="agent.name">{{ agent.name }}</span>
       </div>
@@ -27,8 +27,8 @@
     <div class="card-body">
       <div class="meta-grid">
         <div class="meta-item">
-          <span class="meta-label">会话 ID</span>
-          <span class="meta-value key-value" :title="agent.key">{{ truncateKey }}</span>
+          <span class="meta-label">当前任务</span>
+          <span class="meta-value key-value" :title="agent.label || agent.key">{{ truncateLabel }}</span>
         </div>
 
         <div class="meta-item">
@@ -66,12 +66,12 @@ import type { AgentInfo } from '../stores/agent'
 import { useAgentStore } from '../stores/agent'
 import {
   UserFilled,
-  Refresh,
-  View,
   CircleCheckFilled,
   Clock,
   WarningFilled,
   CircleCloseFilled,
+  Timer,
+  Avatar,
 } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -148,9 +148,23 @@ const percentageClass = computed(() => {
   return 'text-success'
 })
 
-const truncateKey = computed(() => {
-  const key = props.agent.key
-  return key.length > 24 ? key.slice(0, 24) + '…' : key
+const truncateLabel = computed(() => {
+  const label = props.agent.label || props.agent.key
+  return label.length > 24 ? label.slice(0, 24) + '…' : label
+})
+
+const isCronSession = computed(() => {
+  return props.agent.key.includes(':cron:')
+})
+
+const isSpecialAgent = computed(() => {
+  return props.agent.name === '副总' || props.agent.name === '执行秘书'
+})
+
+const avatarIcon = computed(() => {
+  if (isSpecialAgent.value) return Avatar
+  if (isCronSession.value) return Timer
+  return UserFilled
 })
 
 function openDrawer(): void {

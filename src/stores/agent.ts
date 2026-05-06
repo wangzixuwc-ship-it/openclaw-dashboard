@@ -13,19 +13,20 @@ export interface TokenUsage {
 export interface AgentInfo {
   key: string
   name: string
+  label?: string
   status: AgentStatus
   lastActivity?: string
   createdAt?: string
   tokenUsage?: TokenUsage
   details?: Record<string, unknown>
   elapsedMs?: number
-  model?: string  // Add model field for cost calculation
+  model?: string
 }
 
 // Agent name mapping (from openclaw.json)
 const AGENT_NAME_MAP: Record<string, string> = {
   'main': '副总',
-  'recorder': '副总秘书',
+  'recorder': '执行秘书',
   'seo': '网站运营',
   'backend': '后端开发',
   'frontend': '前端开发',
@@ -261,6 +262,7 @@ export const useAgentStore = defineStore('agent', () => {
     return {
       key: rawKey,
       name: agentName,
+      label: str(item.label) || undefined,
       status: derivedStatus,
       lastActivity: num(item.updatedAt) || undefined, // Store as numeric timestamp for uptime calculation
       createdAt: str(item.startedAt ?? item.createdAt ?? item.created) || undefined,

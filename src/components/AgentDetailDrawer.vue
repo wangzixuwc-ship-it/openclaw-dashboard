@@ -9,7 +9,7 @@
   >
     <template #header>
       <div class="drawer-title">
-        <el-icon :size="20" :class="statusColorClass"><UserFilled /></el-icon>
+        <el-icon :size="20" :class="statusColorClass"><component :is="drawerAvatarIcon" /></el-icon>
         <span class="title-text">{{ agent?.name }}</span>
         <el-tag
           :type="statusTagType"
@@ -41,8 +41,8 @@
 
         <div class="info-grid">
           <div class="info-item">
-            <span class="info-label">会话 ID</span>
-            <span class="info-value monospace" :title="agent.key">{{ agent.key }}</span>
+            <span class="info-label">当前任务</span>
+            <span class="info-value monospace" :title="agent.label || agent.key">{{ agent.label || agent.key }}</span>
           </div>
           <div class="info-item" v-if="agent.model">
             <span class="info-label">模型</span>
@@ -192,6 +192,8 @@ import {
   User,
   Monitor,
   Finished,
+  Avatar,
+  Timer,
 } from '@element-plus/icons-vue'
 
 interface MessageItem {
@@ -276,6 +278,20 @@ const statusIcon = computed(() => {
 
 const formattedDuration = computed(() => {
   return store.formatDuration(agent.value?.elapsedMs)
+})
+
+const isSpecialAgent = computed(() => {
+  return agent.value?.name === '副总' || agent.value?.name === '执行秘书'
+})
+
+const isCronSession = computed(() => {
+  return agent.value?.key?.includes(':cron:')
+})
+
+const drawerAvatarIcon = computed(() => {
+  if (isSpecialAgent.value) return Avatar
+  if (isCronSession.value) return Timer
+  return UserFilled
 })
 
 const percentageClass = computed(() => {
