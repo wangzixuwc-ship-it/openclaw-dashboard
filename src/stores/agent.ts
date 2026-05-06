@@ -78,12 +78,18 @@ export const useAgentStore = defineStore('agent', () => {
   const abortedAgents = computed(() => agents.value.filter((a) => a.status === 'aborted'))
   const unknownAgents = computed(() => agents.value.filter((a) => a.status === 'unknown'))
 
-  // Uptime: use oldest session's updatedAt as reference (when openclaw started)
-  // We stored updatedAt (numeric timestamp) in lastActivity during normalizeAgent
+  // Uptime: use oldest session's createdAt as reference (when openclaw started)
   const oldestSessionTime = computed(() => {
     if (agents.value.length === 0) return 0
     const times = agents.value
-      .map((a) => a.lastActivity || 0) // lastActivity is numeric timestamp (ms)
+      .map((a) => {
+        // Use createdAt (startedAt/createdAt/created) as it represents session creation time
+        if (a.createdAt) {
+          return new Date(a.createdAt).getTime()
+        }
+        // Fallback to lastActivity if createdAt is unavailable
+        return a.lastActivity || 0
+      })
       .filter((t) => t > 0)
     if (times.length === 0) return 0
     return Math.min(...times)
@@ -439,14 +445,22 @@ export const useAgentStore = defineStore('agent', () => {
     return `${hours}h ${minutes % 60}m`
   }
 
-  // Total token consumption - from global usage stats (usage-stats service)
+  // Total token consumption within uptime period
   const totalTokensUsed = computed(() => {
-    // Use global usage data if available, otherwise fallback to raw sessions
-    if (globalUsage.value.totalTokens > 0) {
-      return globalUsage.value.totalTokens
-    }
-    // Fallback: sum from raw API data
-    return allSessionsRaw.value.reduce((sum, s) => {
+    const uptimeStart = oldestSessionTime.value
+    if (uptimeStart === 0) return 0
+
+    // Filter sessions created after uptime start
+    const sessionsInUptime = allSessionsRaw.value.filter((s) => {
+      const r = s as Record<string, unknown>
+      const createdAt = r.startedAt ?? r.createdAt ?? r.created
+      if (!createdAt) return true // Include sessions without creation time
+      const createdTime = typeof createdAt === 'number' ? createdAt : new Date(createdAt as string).getTime()
+      return createdTime >= uptimeStart
+    })
+
+    // Sum tokens from filtered sessions
+    return sessionsInUptime.reduce((sum, s) => {
       const r = s as Record<string, unknown>
       let t = Number(r.totalTokens)
       if (isNaN(t) || t <= 0) {
@@ -457,19 +471,18 @@ export const useAgentStore = defineStore('agent', () => {
     }, 0)
   })
 
-  // Total cost estimate (CNY) = token cost + electricity
-  // Token cost: ¥10 per 1M tokens; Electricity: ¥2 per hour of uptime
-  const CNY_PER_MILLION_TOKENS = 10
+  // Total cost = OpenClaw's tracked cost + electricity
+  // OpenClaw cost: from usage-stats service (message.usage.cost.total)
+  // Electricity cost: ¥2 per hour of uptime
   const ELECTRICITY_PER_HOUR = 2
 
   const totalCostCny = computed(() => {
-    // Token cost
-    const totalTokens = totalTokensUsed.value
-    const tokenCost = totalTokens > 0 ? (totalTokens / 1000000) * CNY_PER_MILLION_TOKENS : 0
+    // OpenClaw's actual cost (if available)
+    const openclawCost = globalUsage.value.totalCost || 0
     // Electricity cost: uptime hours * 2
     const uptimeHours = uptimeMs.value / (1000 * 60 * 60)
     const electricityCost = uptimeHours * ELECTRICITY_PER_HOUR
-    return tokenCost + electricityCost
+    return openclawCost + electricityCost
   })
 
   function formatCost(cny: number): string {
