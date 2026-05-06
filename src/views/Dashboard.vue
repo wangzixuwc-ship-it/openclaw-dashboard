@@ -6,6 +6,7 @@
         <div class="brand">
           <el-icon :size="24" class="brand-icon"><Monitor /></el-icon>
           <h1 class="brand-title">OpenClaw 监控台</h1>
+          <span class="brand-time">{{ currentTime }}</span>
         </div>
 
         <div class="status-indicators">
@@ -174,7 +175,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAgentStore, type AgentInfo } from '../stores/agent'
 import AgentCard from '../components/AgentCard.vue'
 import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
@@ -191,6 +192,20 @@ import {
 } from '@element-plus/icons-vue'
 
 const store = useAgentStore()
+
+// Real-time clock in status bar (updates every minute)
+const currentTime = ref('')
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+function updateClock(): void {
+  const now = new Date()
+  const Y = now.getFullYear()
+  const M = String(now.getMonth() + 1).padStart(2, '0')
+  const D = String(now.getDate()).padStart(2, '0')
+  const h = String(now.getHours()).padStart(2, '0')
+  const m = String(now.getMinutes()).padStart(2, '0')
+  currentTime.value = `${Y}年${M}月${D}日 ${h}:${m}`
+}
 
 // Drawer
 const drawerVisible = ref(false)
@@ -288,6 +303,16 @@ async function refreshAll(): Promise<void> {
 onMounted(() => {
   refreshAll()
   store.subscribeAgents()
+  // Start real-time clock
+  updateClock()
+  clockTimer = setInterval(updateClock, 60 * 1000) // update every minute
+})
+
+onUnmounted(() => {
+  if (clockTimer) {
+    clearInterval(clockTimer)
+    clockTimer = null
+  }
 })
 </script>
 
@@ -331,16 +356,25 @@ onMounted(() => {
   color: var(--accent);
 }
 
-.brand-title {
-  color: var(--text-primary);
-  font-size: 18px;
-  font-weight: 700;
-  margin: 0;
-  background: linear-gradient(90deg, var(--accent), #42a5f5);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
+ .brand-title {
+   color: var(--text-primary);
+   font-size: 18px;
+   font-weight: 700;
+   margin: 0;
+   background: linear-gradient(90deg, var(--accent), #42a5f5);
+   -webkit-background-clip: text;
+   -webkit-text-fill-color: transparent;
+   background-clip: text;
+ }
+
+ .brand-time {
+   color: var(--text-secondary);
+   font-size: 13px;
+   font-variant-numeric: tabular-nums;
+   margin-left: 12px;
+   padding-left: 12px;
+   border-left: 1px solid var(--border-color);
+ }
 
 .status-indicators {
   display: flex;

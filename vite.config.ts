@@ -31,6 +31,11 @@ export default defineConfig(({ mode }) => {
           ws: true, // Enable WebSocket proxy
           rewrite: (path) => path.replace(/^\/api/, ''),
         },
+        '/usage-stats': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/usage-stats/, ''),
+        },
       },
     },
     build: {

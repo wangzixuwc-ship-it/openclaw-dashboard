@@ -61,6 +61,13 @@ export const useAgentStore = defineStore('agent', () => {
   const error = ref<string | null>(null)
   const healthStatus = ref<AgentState['healthStatus']>('unknown')
   const now = ref(Date.now()) // Reactive "now" that ticks every second for uptime display
+  
+  // Global usage stats from usage-stats service
+  const globalUsage = ref<{
+    totalTokens: number
+    totalCost: number
+    updatedAt: string
+  }>({ totalTokens: 0, totalCost: 0, updatedAt: '' })
 
   // Getters
   const agentCount = computed(() => agents.value.length)
@@ -314,17 +321,42 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  /**
+   * Fetch global usage stats from usage-stats service
+   */
+  async function fetchGlobalUsage(): Promise<void> {
+    try {
+      // Use Vite proxy to avoid CORS issues
+      const response = await fetch('/usage-stats/api/usage')
+      if (!response.ok) {
+        console.warn('[AgentStore] Failed to fetch global usage:', response.status)
+        return
+      }
+      const data = await response.json()
+      globalUsage.value = {
+        totalTokens: data.totalTokens || 0,
+        totalCost: data.totalCost || 0,
+        updatedAt: data.updatedAt || '',
+      }
+      console.log('[AgentStore] Global usage loaded:', data.totalTokens, 'tokens')
+    } catch (e) {
+      console.warn('[AgentStore] fetchGlobalUsage error:', e)
+    }
+  }
+
   let pollingInterval: ReturnType<typeof setInterval> | null = null
   let uptimeTimer: ReturnType<typeof setInterval> | null = null
   const POLL_MS = 30000
 
   function subscribeAgents(): void {
     fetchAgents()
+    fetchGlobalUsage()  // Load global usage stats
     fetchHealth()
     if (pollingInterval) clearInterval(pollingInterval)
     if (uptimeTimer) clearInterval(uptimeTimer)
     pollingInterval = setInterval(() => {
       fetchAgents()
+      fetchGlobalUsage()  // Refresh global usage every 30s
     }, POLL_MS)
     // Update 'now' every second so uptime display refreshes
     uptimeTimer = setInterval(() => {
@@ -405,17 +437,27 @@ export const useAgentStore = defineStore('agent', () => {
     return `${hours}h ${minutes % 60}m`
   }
 
-  // Total token consumption - sum ALL sessions' totalTokens (from raw API data)
+  // Total token consumption - from global usage stats (usage-stats service)
   const totalTokensUsed = computed(() => {
+    // Use global usage data if available, otherwise fallback to raw sessions
+    if (globalUsage.value.totalTokens > 0) {
+      return globalUsage.value.totalTokens
+    }
+    // Fallback: sum from raw API data
     return allSessionsRaw.value.reduce((sum, s) => {
-      const t = Number((s as Record<string, unknown>).totalTokens)
+      const r = s as Record<string, unknown>
+      let t = Number(r.totalTokens)
+      if (isNaN(t) || t <= 0) {
+        const usage = r.usage as Record<string, unknown> | undefined
+        if (usage) t = Number(usage.totalTokens ?? usage.total_tokens ?? usage.total)
+      }
       return sum + (isNaN(t) ? 0 : t)
     }, 0)
   })
 
   // Total cost estimate (CNY) = token cost + electricity
-  // Token cost: ¥12 per 1M tokens; Electricity: ¥2 per hour of uptime
-  const CNY_PER_MILLION_TOKENS = 12
+  // Token cost: ¥10 per 1M tokens; Electricity: ¥2 per hour of uptime
+  const CNY_PER_MILLION_TOKENS = 10
   const ELECTRICITY_PER_HOUR = 2
 
   const totalCostCny = computed(() => {
