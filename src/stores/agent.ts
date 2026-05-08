@@ -222,8 +222,8 @@ export const useAgentStore = defineStore('agent', () => {
           const idleThreshold = isCronAgent ? 60 : 300
           derivedStatus = secondsSinceUpdate < idleThreshold ? 'running' : 'idle'
         } else {
-          // Other agents: always running unless aborted/error/unknown
-          derivedStatus = 'running'
+          const idleThreshold = 600
+          derivedStatus = secondsSinceUpdate < idleThreshold ? 'running' : 'idle'
         }
       } else {
         // No updatedAt at all
