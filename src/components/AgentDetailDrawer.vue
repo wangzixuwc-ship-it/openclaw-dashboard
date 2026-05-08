@@ -151,12 +151,12 @@
       <!-- Action Buttons -->
       <div class="action-bar">
         <el-button
-          type="primary"
+          type="danger"
           :icon="Refresh"
-          @click="refreshStatus"
-          :loading="refreshing"
+          @click="handleResetSession"
+          :loading="resetting"
         >
-          刷新状态
+          重置会话
         </el-button>
         <el-button
           :icon="View"
@@ -174,6 +174,7 @@
 import { ref, computed, watch, type Component } from 'vue'
 import type { AgentInfo } from '../stores/agent'
 import { useAgentStore } from '../stores/agent'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   UserFilled,
   InfoFilled,
@@ -228,7 +229,7 @@ const agent = computed(() => {
 const historyCount = ref(0)
 const recentMessages = ref<MessageItem[]>([])
 const loadingHistory = ref(false)
-const refreshing = ref(false)
+const resetting = ref(false)
 
 // Computed
 const displayStatus = computed(() => {
@@ -372,11 +373,41 @@ async function loadHistory(): Promise<void> {
 
 async function refreshStatus(): Promise<void> {
   if (!agent.value?.key) return
-  refreshing.value = true
+  resetting.value = true
   try {
     await store.fetchAgentStatus(agent.value.key)
   } finally {
-    setTimeout(() => { refreshing.value = false }, 500)
+    setTimeout(() => { resetting.value = false }, 500)
+  }
+}
+
+async function handleResetSession(): Promise<void> {
+  if (!agent.value?.key) return
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要重置 "${agent.value.name}" 的会话吗？这将发送 /reset 指令。`,
+      '重置会话',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    
+    resetting.value = true
+    await store.resetSession(agent.value.key)
+    ElMessage.success('已发送 /reset 指令')
+    
+    // 刷新状态
+    await refreshStatus()
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error('重置会话失败')
+      console.error('[AgentDetailDrawer] resetSession error:', e)
+    }
+  } finally {
+    resetting.value = false
   }
 }
 

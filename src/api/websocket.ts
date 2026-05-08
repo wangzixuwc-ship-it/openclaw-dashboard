@@ -49,6 +49,7 @@ interface WsConnection {
   connect: () => void
   disconnect: () => void
   send: (data: string | Record<string, unknown>) => void
+  request: (method: string, params?: Record<string, unknown>, timeoutMs?: number) => Promise<unknown>
   onMessage: (handler: MessageHandler) => void
   onError: (handler: ErrorHandler) => void
   onReconnect: (handler: ReconnectHandler) => void
@@ -69,6 +70,11 @@ class GatewayWebSocket {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private retryCount = 0
+  private pendingRequests = new Map<string, {
+    resolve: (value: unknown) => void
+    reject: (reason: unknown) => void
+    timeout: ReturnType<typeof setTimeout>
+  }>()
   private handlers: {
     message: MessageHandler[]
     error: ErrorHandler[]
@@ -88,6 +94,7 @@ class GatewayWebSocket {
   private options: Required<WsOptions>
   private manualDisconnect = false
   private handshakeDone = false
+  private requestIdCounter = 0
 
   constructor(options: Partial<WsOptions> = {}) {
     this.options = { ...defaultOptions, ...options }
@@ -95,6 +102,28 @@ class GatewayWebSocket {
 
   get is() {
     return this.status
+  }
+
+  private nextRequestId(): string {
+    return `req-${++this.requestIdCounter}-${Date.now()}`
+  }
+
+  request(method: string, params: Record<string, unknown> = {}, timeoutMs = 10000): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      if (this.ws?.readyState !== WebSocket.OPEN) {
+        reject(new Error('[GatewayWS] Cannot send request — not connected'))
+        return
+      }
+
+      const id = this.nextRequestId()
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(id)
+        reject(new Error(`[GatewayWS] Request timeout: ${method}`))
+      }, timeoutMs)
+
+      this.pendingRequests.set(id, { resolve, reject, timeout })
+      this.send({ type: 'req', id, method, params })
+    })
   }
 
   connect(): void {
@@ -159,11 +188,28 @@ class GatewayWebSocket {
           this.handshakeDone = true
           this.status = 'connected'
           this.startHeartbeat()
+          const features = (data.payload as Record<string, unknown>).features as Record<string, unknown> | undefined
+          if (features?.methods) {
+            console.log('[GatewayWS] Available methods:', features.methods)
+          }
+          const auth = (data.payload as Record<string, unknown>).auth as Record<string, unknown> | undefined
+          if (auth) {
+            console.log('[GatewayWS] Granted auth:', auth)
+          }
           this.handlers.open.forEach((h) => h())
+          return
+        }
 
-          // Note: session.state events are NOT currently pushed to WS clients (OpenClaw Issue #17057)
-          // Instead, listen for 'sessions.changed' events (automatically broadcast)
-          // and use sessions.list as fallback for initial state
+        // Handle pending request responses
+        if (data?.type === 'res' && data?.id && this.pendingRequests.has(data.id as string)) {
+          const pending = this.pendingRequests.get(data.id as string)!
+          clearTimeout(pending.timeout)
+          this.pendingRequests.delete(data.id as string)
+          if (data.ok === true) {
+            pending.resolve(data)
+          } else {
+            pending.reject(new Error(`[GatewayWS] Request failed: ${JSON.stringify(data)}`))
+          }
           return
         }
 

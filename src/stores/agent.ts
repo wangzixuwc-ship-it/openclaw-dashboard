@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { sessionsList, sessionStatus, health, sessionsHistory } from '../api/gateway'
+import { useGatewayWebSocket } from '../api/websocket'
 
 export type AgentStatus = 'idle' | 'running' | 'error' | 'aborted' | 'unknown'
 
@@ -446,6 +447,34 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  /**
+   * Reset agent session via WebSocket chat.send
+   */
+  async function resetSession(sessionKey: string): Promise<void> {
+    try {
+      const ws = useGatewayWebSocket()
+      if (ws.is !== 'connected') {
+        console.log('[AgentStore] WebSocket not connected, connecting now...')
+        ws.connect()
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('WebSocket connection timeout')), 10000)
+          const poll = setInterval(() => {
+            if (ws.is === 'connected') { clearInterval(poll); clearTimeout(timeout); resolve() }
+          }, 200)
+        })
+      }
+      // Try 'send' RPC method (may require lower permissions)
+      await ws.request('send', {
+        sessionKey,
+        message: '/reset',
+      })
+      console.log(`[AgentStore] Reset session ${sessionKey}`)
+    } catch (e) {
+      console.error(`[AgentStore] resetSession(${sessionKey}) error:`, e)
+      throw e
+    }
+  }
+
   function formatDuration(ms?: number): string {
     if (!ms || ms <= 0) return '-'
     const seconds = Math.floor(ms / 1000)
@@ -528,6 +557,7 @@ export const useAgentStore = defineStore('agent', () => {
     fetchHealth,
     fetchAgentStatus,
     fetchSessionHistory,
+    resetSession,
     getAgentByKey,
     setSearchQuery,
     setFilterStatus,
