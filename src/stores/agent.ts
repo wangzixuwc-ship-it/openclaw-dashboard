@@ -463,8 +463,7 @@ export const useAgentStore = defineStore('agent', () => {
           }, 200)
         })
       }
-      // Try 'send' RPC method (may require lower permissions)
-      await ws.request('send', {
+      await ws.request('chat.send', {
         sessionKey,
         message: '/reset',
       })

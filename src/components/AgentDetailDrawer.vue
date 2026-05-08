@@ -1,7 +1,7 @@
 <template>
   <el-drawer
     v-model="drawerVisible"
-    :title="`Agent 详情：${agent?.name || ''}`"
+    :title="`Agent 详情：${displayAgentName}`"
     size="520px"
     direction="rtl"
     :close-on-click-modal="true"
@@ -10,7 +10,7 @@
     <template #header>
       <div class="drawer-title">
         <el-icon :size="20" :class="statusColorClass"><component :is="drawerAvatarIcon" /></el-icon>
-        <span class="title-text">{{ agent?.name }}</span>
+        <span class="title-text">{{ displayAgentName }}</span>
         <el-tag
           :type="statusTagType"
           :effect="agent?.status === 'running' ? 'dark' : 'light'"
@@ -295,6 +295,11 @@ const drawerAvatarIcon = computed(() => {
   return UserFilled
 })
 
+const displayAgentName = computed(() => {
+  if (isCronSession.value) return '巡检员'
+  return agent.value?.name || ''
+})
+
 const percentageClass = computed(() => {
   const p = agent.value?.tokenUsage?.percentage ?? 0
   if (p >= 90) return 'text-danger'
@@ -386,7 +391,7 @@ async function handleResetSession(): Promise<void> {
   
   try {
     await ElMessageBox.confirm(
-      `确定要重置 "${agent.value.name}" 的会话吗？这将发送 /reset 指令。`,
+      `确定要重置 "${displayAgentName.value}" 的会话吗？这将发送 /reset 指令。`,
       '重置会话',
       {
         confirmButtonText: '确定',
@@ -401,9 +406,17 @@ async function handleResetSession(): Promise<void> {
     
     // 刷新状态
     await refreshStatus()
-  } catch (e) {
+  } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error('重置会话失败')
+      const errorMsg = e?.message || String(e)
+      let userMessage = '重置会话失败'
+      
+      // Check for specific scope errors
+      if (errorMsg.includes('missing scope: operator.write')) {
+        userMessage = '权限不足：需要 operator.write 权限。请在 Gateway 配置中设置 gateway.controlUi.dangerouslyDisableDeviceAuth: true 并重启 Gateway，或者使用 openclaw devices approve --latest 批准设备配对请求。'
+      }
+      
+      ElMessage.error(userMessage)
       console.error('[AgentDetailDrawer] resetSession error:', e)
     }
   } finally {

@@ -10,7 +10,7 @@
         <div class="agent-avatar" :class="statusColorClass">
           <el-icon :size="18"><component :is="avatarIcon" /></el-icon>
         </div>
-        <span class="agent-name" :title="agent.name">{{ agent.name }}</span>
+        <span class="agent-name" :title="displayName">{{ displayName }}</span>
       </div>
       <el-tag
         :type="statusTagType"
@@ -159,6 +159,11 @@ const isCronSession = computed(() => {
 
 const isSpecialAgent = computed(() => {
   return props.agent.name === '副总' || props.agent.name === '执行秘书'
+})
+
+const displayName = computed(() => {
+  if (isCronSession.value) return '巡检员'
+  return props.agent.name
 })
 
 const avatarIcon = computed(() => {

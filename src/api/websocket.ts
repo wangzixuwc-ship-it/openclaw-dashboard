@@ -215,7 +215,7 @@ class GatewayWebSocket {
 
         // Handle connect error
         if (data?.type === 'res' && data?.ok === false) {
-          console.error('[GatewayWS] Handshake failed:', data)
+          console.error('[GatewayWS] Handshake failed:', JSON.stringify(data, null, 2))
           this.ws?.close()
           return
         }

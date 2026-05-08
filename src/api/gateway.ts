@@ -67,7 +67,7 @@ gatewayApi.interceptors.response.use(
 /**
  * Invoke a gateway tool via /tools/invoke
  */
-async function invokeTool(tool: string, args: Record<string, unknown> = {}, sessionKey?: string): Promise<unknown> {
+export async function invokeTool(tool: string, args: Record<string, unknown> = {}, sessionKey?: string): Promise<unknown> {
   const body: Record<string, unknown> = {
     tool,
     action: 'json',
