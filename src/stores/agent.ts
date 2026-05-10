@@ -8,18 +8,6 @@ const HEALTH_CHECK_INTERVAL = 10000 // 10s
 const AGENT_POLL_INTERVAL = 10000 // 10s
 const STORAGE_KEY = 'openclaw_dashboard_agent_filter'
 
-// Agent name mapping
-const AGENT_NAME_MAP: Record<string, string> = {
-  main: '副总',
-  recorder: '执行秘书',
-  backend: '后端',
-  frontend: '前端',
-  debugger: '调试员',
-  codeaudit: '代码审计',
-  cron: '巡检员',
-  testing: '测试',
-}
-
 // Types
 export type AgentStatus = 'running' | 'idle' | 'error' | 'aborted' | 'unknown'
 export type FilterStatus = 'all' | 'running' | 'idle' | 'error' | 'aborted'
@@ -77,8 +65,31 @@ export const useAgentStore = defineStore('agent', () => {
   const filterStatus = ref<FilterStatus>('all')
   const isPolling = ref(false)
   const lastUpdateTime = ref(0)
-  // 动态 Agent 名称映射:API 优先，硬编码降级
-  const agentNameMap = ref<Record<string, string>>({ ...AGENT_NAME_MAP })
+
+  // ============================================
+  // Agent 名称映射：API 为主，.env 配置化降级（REC-091）
+  // 数据来源优先级：agentsList API > .env VITE_AGENT_* 变量 > 原始 key
+  // ============================================
+  /** 从 .env VITE_AGENT_* 变量构建降级映射表 */
+  function buildEnvFallbackMap(): Record<string, string> {
+    const map: Record<string, string> = {}
+    const env = import.meta.env
+    for (const key of Object.keys(env)) {
+      if (key.startsWith('VITE_AGENT_')) {
+        // 变量名中连字符用下划线替代，提取后还原为 hyphen（匹配 OpenClaw agent id）
+        let agentId = key.slice('VITE_AGENT_'.length).replace(/_/g, '-')
+        const name = env[key]
+        if (agentId && name) {
+          map[agentId] = name
+        }
+      }
+    }
+    return map
+  }
+
+  const envFallbackMap = buildEnvFallbackMap()
+  // 动态 Agent 名称映射：初始使用 .env 降级，API 成功后覆盖
+  const agentNameMap = ref<Record<string, string>>({ ...envFallbackMap })
   const agentNameMapLoaded = ref(false)
 
   // Computed
@@ -223,7 +234,7 @@ export const useAgentStore = defineStore('agent', () => {
 
     const rawKey = str(item.key ?? item.sessionKey ?? item.id)
 
-    // Force use Chinese name mapping (动态映射优先,硬编码降级)
+    // 名称映射：API 数据优先，.env 配置化降级（REC-091）
     const map = agentNameMap.value
 
     // Step 1: Try direct lookup (rawKey might be "main", "recorder", etc.)
@@ -465,8 +476,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   /**
    * 动态获取 Agent 名称映射(agentsList API)
-   * 成功:用 API 返回覆盖 agentNameMap
-   * 失败:保持硬编码降级值不变
+   * API 成功 → 覆盖为 API 数据；失败 → 保留 .env 配置化降级（REC-091）
    */
   async function fetchAgentNames(): Promise<void> {
     if (agentNameMapLoaded.value) return // 只调用一次
@@ -482,13 +492,12 @@ export const useAgentStore = defineStore('agent', () => {
             dynamicMap[id] = name
           }
         }
-        // 合并:动态映射优先,硬编码作为降级
-        agentNameMap.value = { ...AGENT_NAME_MAP, ...dynamicMap }
+        agentNameMap.value = dynamicMap
         agentNameMapLoaded.value = true
         console.log('[AgentStore] Agent names loaded from API:', dynamicMap)
       }
     } catch (e) {
-      console.warn('[AgentStore] Failed to load agent names from API, using hardcoded map:', e)
+      console.warn('[AgentStore] Failed to load agent names from API, using .env fallback:', e)
     }
   }
 
