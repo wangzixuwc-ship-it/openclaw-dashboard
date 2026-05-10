@@ -17,6 +17,7 @@
         :effect="agent.status === 'running' ? 'dark' : 'light'"
         size="small"
         class="status-badge"
+        :title="statusDescription"
       >
         <el-icon :size="12"><component :is="statusIcon" /></el-icon>
         {{ displayStatus }}
@@ -61,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { AgentInfo } from '../stores/agent'
 import { useAgentStore } from '../stores/agent'
 import {
@@ -83,7 +84,6 @@ const emit = defineEmits<{
 }>()
 
 const store = useAgentStore()
-const refreshing = ref(false)
 
 const statusTagType = computed(() => {
   switch (props.agent.status) {
@@ -124,6 +124,18 @@ const displayStatus = computed(() => {
     unknown: '未知',
   }
   return map[props.agent.status] ?? props.agent.status
+})
+
+// Status description for tooltip
+const statusDescription = computed(() => {
+  const descriptions: Record<string, string> = {
+    running: 'Agent 正在执行任务',
+    idle: 'Agent 处于空闲状态',
+    error: 'Agent 发生错误',
+    aborted: 'Agent 已被终止',
+    unknown: 'Agent 状态未知',
+  }
+  return descriptions[props.agent.status] || props.agent.status
 })
 
 const durationText = computed(() => {
@@ -174,15 +186,6 @@ const avatarIcon = computed(() => {
 
 function openDrawer(): void {
   emit('detail', props.agent)
-}
-
-async function refreshAgent(): Promise<void> {
-  refreshing.value = true
-  try {
-    await store.fetchAgentStatus(props.agent.key)
-  } finally {
-    setTimeout(() => { refreshing.value = false }, 500)
-  }
 }
 </script>
 

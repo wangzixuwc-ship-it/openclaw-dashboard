@@ -414,6 +414,8 @@ async function handleResetSession(): Promise<void> {
       // Check for specific scope errors
       if (errorMsg.includes('missing scope: operator.write')) {
         userMessage = '权限不足：需要 operator.write 权限。请在 Gateway 配置中设置 gateway.controlUi.dangerouslyDisableDeviceAuth: true 并重启 Gateway，或者使用 openclaw devices approve --latest 批准设备配对请求。'
+      } else if (errorMsg.includes('Tool not available') || errorMsg.includes('sessions_send')) {
+        userMessage = 'sessions_send 工具不可用。请检查 Gateway 配置，确保启用了 sessions_send 工具，或者在 Gateway 配置中设置 gateway.controlUi.dangerouslyDisableDeviceAuth: true 并重启 Gateway。'
       }
       
       ElMessage.error(userMessage)

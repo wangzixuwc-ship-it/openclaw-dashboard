@@ -34,7 +34,7 @@
     <section class="stats-section">
       <div class="stats-inner">
         <el-card
-          v-for="(stat, i) in statsCards"
+          v-for="stat in statsCards"
           :key="stat.label"
           class="stat-card"
           :class="stat.class"
@@ -215,7 +215,7 @@ const selectedAgent = ref<AgentInfo | null>(null)
 const statsCards = computed(() => [
   {
     label: '总计',
-    value: store.agentCount,
+    value: store.totalAgents,
     icon: Odometer,
     iconClass: 'icon-blue',
     class: 'stat-total',

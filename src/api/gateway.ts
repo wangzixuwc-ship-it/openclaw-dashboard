@@ -36,7 +36,7 @@ gatewayApi.interceptors.response.use(
       }
       // If result.content exists with text field, parse JSON
       if (result?.content && Array.isArray(result.content)) {
-        const textItem = result.content.find((c: any) => c.type === 'text')
+        const textItem = result.content.find((c) => c.type === 'text')
         if (textItem?.text) {
           try {
             return JSON.parse(textItem.text)
@@ -112,11 +112,35 @@ export async function sessionStatus(sessionKey: string): Promise<unknown> {
 }
 
 /**
+ * Send message to session (发送消息到会话，用于重置等操作)
+ * Uses: POST /tools/invoke with tool=sessions_send
+ */
+export async function sessionsSend(sessionKey: string, message: string, timeoutSeconds: number = 0): Promise<unknown> {
+  return invokeTool('sessions_send', { sessionKey, message, timeoutSeconds })
+}
+
+/**
+ * Get session history (会话历史记录)
+ * Uses: POST /tools/invoke with tool=sessions_history
+ */
+export async function getSessionHistory(sessionKey: string, limit: number = 50, includeTools: boolean = false): Promise<unknown> {
+  return invokeTool('sessions_history', { sessionKey, limit, includeTools })
+}
+
+/**
  * Gateway health check
  * Maps to: GET /health
  */
 export async function health(): Promise<unknown> {
   return gatewayApi.get('/health')
+}
+
+/**
+ * Reset session (重置会话)
+ * Sends /reset command via sessions_send tool
+ */
+export async function resetSession(sessionKey: string): Promise<unknown> {
+  return sessionsSend(sessionKey, '/reset', 0)
 }
 
 export default gatewayApi
