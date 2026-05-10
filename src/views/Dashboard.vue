@@ -10,6 +10,12 @@
         </div>
 
         <div class="status-indicators">
+          <!-- Gateway Version -->
+          <div class="indicator indicator-version">
+            <span class="indicator-label">OpenClaw</span>
+            <span class="indicator-value">{{ store.gatewayVersion || '未知' }}</span>
+          </div>
+
           <!-- Gateway Health -->
           <div class="indicator" :class="healthClass">
             <el-icon :size="14"><component :is="healthIcon" /></el-icon>
@@ -414,6 +420,22 @@ onUnmounted(() => {
 .health-healthy { background: rgba(76, 175, 80, 0.15); color: #81c784; border-color: rgba(76,175,80,0.3) !important; }
 .health-unhealthy { background: rgba(244, 67, 54, 0.15); color: #e57373; border-color: rgba(244,67,54,0.3) !important; }
 .health-unknown { background: rgba(255, 193, 7, 0.15); color: #ffd54f; border-color: rgba(255,193,7,0.3) !important; }
+
+.indicator-version {
+  background: rgba(66, 165, 245, 0.15);
+  border-color: rgba(66,165,245,0.3) !important;
+}
+
+.indicator-version .indicator-label {
+  color: #64b5f6;
+  font-weight: 600;
+}
+
+.indicator-version .indicator-value {
+  color: #90caf9;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+}
 
 .refresh-btn {
   flex-shrink: 0;

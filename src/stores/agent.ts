@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { sessionsList, sessionStatus, health, sessionsHistory, resetSession as resetSessionApi, agentsList, ToolRestrictedError } from '../api/gateway'
+import { sessionsList, sessionStatus, health, sessionsHistory, resetSession as resetSessionApi, agentsList } from '../api/gateway'
 import { getUsageStats } from '../api/usage-stats'
 
 // Constants
@@ -71,10 +71,13 @@ export const useAgentStore = defineStore('agent', () => {
   const globalUsage = ref<GlobalUsage>({ totalTokens: 0, totalCost: 0, updatedAt: '' })
   const healthStatus = ref<string>('unknown')
   const gatewayUptimeMs = ref<number>(0) // Gateway uptime from API
+  const gatewayVersion = ref<string>(import.meta.env.VITE_OPENCLAW_VERSION || '') // Gateway version from /health, fallback from env (REC-089)
+  // Fallback: use env var if /health doesn't return version (REC-089 fix)
+  const fallbackVersion = import.meta.env.VITE_OPENCLAW_VERSION || ''
   const filterStatus = ref<FilterStatus>('all')
   const isPolling = ref(false)
   const lastUpdateTime = ref(0)
-  // 动态 Agent 名称映射:API 优先,硬编码降级
+  // 动态 Agent 名称映射:API 优先，硬编码降级
   const agentNameMap = ref<Record<string, string>>({ ...AGENT_NAME_MAP })
   const agentNameMapLoaded = ref(false)
 
@@ -404,7 +407,7 @@ export const useAgentStore = defineStore('agent', () => {
     try {
       const data = await health()
       const typed = data as Record<string, unknown>
-      // /health 返回 { ok: true, status: "live" }
+      // /health 返回 { ok: true, status: "live", version: "2026.3.13" }
       // 映射 Gateway 的 status/ok 值到 UI 期望的值
       const raw = String(typed.status ?? '')
       const isOk = typed.ok === true || typed.ok === 'true'
@@ -414,6 +417,14 @@ export const useAgentStore = defineStore('agent', () => {
         healthStatus.value = 'unhealthy'
       } else {
         healthStatus.value = 'unknown'
+      }
+      // 提取版本号 (REC-089: /health 不返回 version 时使用环境变量兜底)
+      const version = typed.version
+      if (typeof version === 'string' && version) {
+        gatewayVersion.value = version
+      } else if (fallbackVersion) {
+        // Fallback: 从 VITE_OPENCLAW_VERSION 环境变量获取 (来自 openclaw package.json)
+        gatewayVersion.value = fallbackVersion
       }
     } catch (e) {
       console.warn('[AgentStore] fetchHealth error:', e)
@@ -484,13 +495,8 @@ export const useAgentStore = defineStore('agent', () => {
   async function resetSession(sessionKey: string): Promise<void> {
     try {
       await resetSessionApi(sessionKey)
-      console.log(`[AgentStore] Reset session ${sessionKey} via sessions_send API`)
+      console.log(`[AgentStore] Reset session ${sessionKey} via WebSocket chat.send`)
     } catch (e: any) {
-      // 保留 ToolRestrictedError 的语义,向上层传递
-      if (e instanceof ToolRestrictedError) {
-        console.warn(`[AgentStore] resetSession(${sessionKey}) blocked: ${e.tool} 不可用`)
-        throw e
-      }
       console.error(`[AgentStore] resetSession(${sessionKey}) error:`, e)
       throw e
     }
@@ -550,6 +556,7 @@ export const useAgentStore = defineStore('agent', () => {
     globalUsage,
     healthStatus,
     gatewayUptimeMs,
+    gatewayVersion,
     filterStatus,
     agentNameMap,
     isPolling,

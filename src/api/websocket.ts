@@ -5,13 +5,18 @@ import { getAuthToken } from '../config/auth'
  * 首次连接时生成，localStorage 持久化（刷新后保持一致）
  */
 function getWsClientId(): string {
-  const storageKey = 'openclaw-ws-client-id'
-  let id = localStorage.getItem(storageKey)
-  if (!id) {
-    id = `gw-${crypto.randomUUID().slice(0, 8)}`
-    localStorage.setItem(storageKey, id)
+  const STORAGE_KEY = 'ws-client-id'
+  try {
+    let id = localStorage.getItem(STORAGE_KEY)
+    if (!id) {
+      id = `ws-${crypto.randomUUID()}`
+      localStorage.setItem(STORAGE_KEY, id)
+    }
+    return id
+  } catch {
+    // localStorage not available (SSR or incognito), fall back to random
+    return `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   }
-  return id
 }
 
 // Build WebSocket URL (direct to gateway, no Vite proxy for WS).
@@ -35,22 +40,6 @@ function buildWsUrl(): string {
   }
   console.warn('[GatewayWS] No auth token — connecting without authentication')
   return `${baseUrl}/ws`
-}
-
-// Unique WebSocket client ID — persisted in localStorage to survive reconnects
-function getWsClientId(): string {
-  const STORAGE_KEY = 'ws-client-id'
-  try {
-    let id = localStorage.getItem(STORAGE_KEY)
-    if (!id) {
-      id = `ws-${crypto.randomUUID()}`
-      localStorage.setItem(STORAGE_KEY, id)
-    }
-    return id
-  } catch {
-    // localStorage not available (SSR or incognito), fall back to random
-    return `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  }
 }
 
 export type WsMessage = Record<string, unknown>

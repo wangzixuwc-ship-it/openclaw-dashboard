@@ -171,7 +171,11 @@ async function isToolAvailable(toolName: string, cacheTtlMs = 60_000): Promise<b
     const resp = await gatewayApi.post('/tools/invoke', body)
     // 如果 interceptor 没有 reject，说明调用成功（或至少未被安全策略拒绝）
     const data = resp?.data ?? resp
-    const ok = data?.ok === true || data?.result !== undefined || (typeof data === 'object' && !data?.error)
+    // Check inner result status — a tool call can return ok: true at HTTP level
+    // but the actual tool execution may have failed (e.g., missing scope)
+    const innerError = data?.result?.error || data?.error
+    const innerStatus = data?.result?.status
+    const ok = data?.ok === true && !innerError && innerStatus !== 'error'
     toolAvailabilityCache.set(toolName, { ok, expireAt: now + cacheTtlMs })
     return ok
   } catch (e: any) {
@@ -189,23 +193,18 @@ async function isToolAvailable(toolName: string, cacheTtlMs = 60_000): Promise<b
 
 /**
  * Reset session (重置会话)
- * Sends /reset command via sessions_send tool
- * 包含前置检测：如果 sessions_send 不可用，提前返回结构化错误
+ * 通过 WebSocket chat.send 发送 /reset 命令，只需要 operator.write 权限
+ * sessions_send 需要 operator.admin 权限，Control UI 没有
  */
 export async function resetSession(sessionKey: string): Promise<unknown> {
-  const available = await isToolAvailable('sessions_send')
-  if (!available) {
-    throw new ToolRestrictedError('sessions_send', [
-      '1. 编辑 Gateway 配置文件 (openclaw.yaml / .openclaw.yaml)',
-      '2. 添加以下配置：',
-      '   gateway:',
-      '     tools:',
-      '       allow:',
-      '         - sessions_send',
-      '3. 重启 Gateway：openclaw gateway restart',
-    ])
+  const { useGatewayWebSocket } = await import('./websocket')
+  const ws = useGatewayWebSocket()
+  try {
+    return await ws.request('chat.send', { sessionKey, message: '/reset' })
+  } catch (e: any) {
+    console.error('[Gateway] resetSession via chat.send failed:', e)
+    throw new Error(`重置失败: ${e.message}`)
   }
-  return sessionsSend(sessionKey, '/reset', 0)
 }
 
 export default gatewayApi
