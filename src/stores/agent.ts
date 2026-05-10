@@ -45,6 +45,7 @@ export interface AgentInfo {
   startedAt?: number
   endedAt?: number
   runtimeMs?: number
+  elapsedMs?: number
   systemSent?: boolean
   abortedLastRun?: boolean
   lastChannel?: string
@@ -306,6 +307,7 @@ export const useAgentStore = defineStore('agent', () => {
       startedAt: typeof startedAt === 'number' ? startedAt : undefined,
       endedAt: typeof item.endedAt === 'number' ? item.endedAt : undefined,
       runtimeMs: typeof item.runtimeMs === 'number' ? item.runtimeMs : undefined,
+      elapsedMs: typeof item.elapsedMs === 'number' ? item.elapsedMs : (typeof item.runtimeMs === 'number' ? item.runtimeMs : undefined),
       systemSent: Boolean(item.systemSent),
       abortedLastRun: Boolean(item.abortedLastRun),
       lastChannel: str(item.lastChannel),
