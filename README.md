@@ -16,3 +16,6 @@
 在 `.env` 文件中配置 OpenClaw 系统的 API 地址、Token、电费单价、OpenClaw 版本、Agent 中文称呼等。
 请参考 [env.example](.env.example)。
 如果需要自定义 Agent 中文称呼，需要在 `.env` 文件中添加对应的变量名，格式为 `VITE_AGENT_<id>=<中文名称>`（id 中连字符用下划线替换）。
+
+# 注意
+Openclaw 的版本必须在 2026.3.28 以上。
