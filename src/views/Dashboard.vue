@@ -249,21 +249,21 @@ const statsCards = computed(() => [
     class: 'stat-error',
   },
   {
-    label: '运行时间',
+    label: '本次运行时间',
     value: store.formatUptime(store.uptimeMs),
     icon: Monitor,
     iconClass: 'icon-purple',
     class: 'stat-uptime',
   },
   {
-    label: '总Token',
+    label: '历史消耗Token',
     value: (store.totalTokensUsed || 0).toLocaleString(),
     icon: Odometer,
     iconClass: 'icon-orange',
     class: 'stat-tokens',
   },
   {
-    label: '总费用',
+    label: '本次运行费用',
     value: store.formatCost(store.totalCostCny),
     icon: Money,
     iconClass: 'icon-green',
@@ -276,6 +276,7 @@ const healthDisplay = computed(() => {
   switch (store.healthStatus) {
     case 'healthy': return '正常'
     case 'unhealthy': return '异常'
+    case 'unknown': return '未知'
     default: return '检查中...'
   }
 })
@@ -283,6 +284,7 @@ const healthClass = computed(() => {
   switch (store.healthStatus) {
     case 'healthy': return 'health-healthy'
     case 'unhealthy': return 'health-unhealthy'
+    case 'unknown': return 'health-unknown'
     default: return 'health-unknown'
   }
 })

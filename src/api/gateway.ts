@@ -136,10 +136,75 @@ export async function health(): Promise<unknown> {
 }
 
 /**
+ * 结构化工具限制错误
+ */
+export class ToolRestrictedError extends Error {
+  code = 'TOOLS_RESTRICTED'
+  tool: string
+  steps: string[]
+
+  constructor(tool: string, steps: string[]) {
+    super(`工具 "${tool}" 不可用 — Gateway 安全策略限制`)
+    this.name = 'ToolRestrictedError'
+    this.tool = tool
+    this.steps = steps
+  }
+}
+
+/**
+ * 工具可用性缓存 (key: toolName, value: boolean)
+ */
+const toolAvailabilityCache = new Map<string, { ok: boolean; expireAt: number }>()
+
+/**
+ * 前置检测：某个工具是否被 Gateway 允许调用
+ * 通过轻量探测 + 缓存实现，避免每次都触发完整调用
+ */
+async function isToolAvailable(toolName: string, cacheTtlMs = 60_000): Promise<boolean> {
+  const now = Date.now()
+  const cached = toolAvailabilityCache.get(toolName)
+  if (cached && cached.expireAt > now) return cached.ok
+
+  try {
+    // 用空参数做一次探测调用
+    const body: Record<string, unknown> = { tool: toolName, action: 'json', args: {} }
+    const resp = await gatewayApi.post('/tools/invoke', body)
+    // 如果 interceptor 没有 reject，说明调用成功（或至少未被安全策略拒绝）
+    const data = resp?.data ?? resp
+    const ok = data?.ok === true || data?.result !== undefined || (typeof data === 'object' && !data?.error)
+    toolAvailabilityCache.set(toolName, { ok, expireAt: now + cacheTtlMs })
+    return ok
+  } catch (e: any) {
+    const status = e?.response?.status
+    const errData = e?.response?.data
+    const msg = String(errData?.error?.message ?? errData?.message ?? e?.message ?? '')
+    // 403 / "denied" / "not available" / "not allowed" → 不可用
+    const isRestricted =
+      status === 403 ||
+      /denied|forbidden|not\s+available|not\s+allowed|tool.*restrict|invoke.*reject/i.test(msg)
+    toolAvailabilityCache.set(toolName, { ok: !isRestricted, expireAt: now + cacheTtlMs })
+    return !isRestricted
+  }
+}
+
+/**
  * Reset session (重置会话)
  * Sends /reset command via sessions_send tool
+ * 包含前置检测：如果 sessions_send 不可用，提前返回结构化错误
  */
 export async function resetSession(sessionKey: string): Promise<unknown> {
+  const available = await isToolAvailable('sessions_send')
+  if (!available) {
+    throw new ToolRestrictedError('sessions_send', [
+      '1. 编辑 Gateway 配置文件 (openclaw.yaml / .openclaw.yaml)',
+      '2. 添加以下配置：',
+      '   gateway:',
+      '     tools:',
+      '       allow:',
+      '         - sessions_send',
+      '3. 重启 Gateway：openclaw gateway restart',
+    ])
+  }
   return sessionsSend(sessionKey, '/reset', 0)
 }
 

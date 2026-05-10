@@ -1,5 +1,19 @@
 import { getAuthToken } from '../config/auth'
 
+/**
+ * 获取 WebSocket 客户端唯一 ID
+ * 首次连接时生成，localStorage 持久化（刷新后保持一致）
+ */
+function getWsClientId(): string {
+  const storageKey = 'openclaw-ws-client-id'
+  let id = localStorage.getItem(storageKey)
+  if (!id) {
+    id = `gw-${crypto.randomUUID().slice(0, 8)}`
+    localStorage.setItem(storageKey, id)
+  }
+  return id
+}
+
 // Build WebSocket URL (direct to gateway, no Vite proxy for WS).
 function buildWsUrl(): string {
   const rawWsUrl = import.meta.env.VITE_WS_URL
@@ -21,6 +35,22 @@ function buildWsUrl(): string {
   }
   console.warn('[GatewayWS] No auth token — connecting without authentication')
   return `${baseUrl}/ws`
+}
+
+// Unique WebSocket client ID — persisted in localStorage to survive reconnects
+function getWsClientId(): string {
+  const STORAGE_KEY = 'ws-client-id'
+  try {
+    let id = localStorage.getItem(STORAGE_KEY)
+    if (!id) {
+      id = `ws-${crypto.randomUUID()}`
+      localStorage.setItem(STORAGE_KEY, id)
+    }
+    return id
+  } catch {
+    // localStorage not available (SSR or incognito), fall back to random
+    return `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  }
 }
 
 export type WsMessage = Record<string, unknown>
@@ -158,7 +188,7 @@ class GatewayWebSocket {
           const payload = data.payload as Record<string, unknown>
           const nonce = (payload?.nonce as string) || ''
 
-          // For browser-based Control UI, use 'gateway-client' as client ID
+          // For browser-based Control UI, generate unique client ID
           // This is a trusted local client that can omit device identity when authenticating with shared token
           // See: https://docs.openclaw.ai/gateway/protocol (Trusted same-process backend clients section)
           const connectReq = {
@@ -169,7 +199,7 @@ class GatewayWebSocket {
               minProtocol: 3,
               maxProtocol: 3,
               client: {
-                id: 'gateway-client',  // Trusted backend client - can omit device on localhost
+                id: getWsClientId(),  // 唯一客户端 ID（crypto.randomUUID + localStorage 持久化）
                 version: '1.0.0',
                 platform: 'web',
                 mode: 'backend',  // Backend mode for gateway-client

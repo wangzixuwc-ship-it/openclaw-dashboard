@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { sessionsList, sessionStatus, health, sessionsHistory, resetSession as resetSessionApi } from '../api/gateway'
+import { sessionsList, sessionStatus, health, sessionsHistory, resetSession as resetSessionApi, agentsList, ToolRestrictedError } from '../api/gateway'
 import { getUsageStats } from '../api/usage-stats'
 
 // Constants
 const HEALTH_CHECK_INTERVAL = 10000 // 10s
-const AGENT_POLL_INTERVAL = 30000 // 30s
+const AGENT_POLL_INTERVAL = 10000 // 10s
 const STORAGE_KEY = 'openclaw_dashboard_agent_filter'
 
 // Agent name mapping
@@ -17,6 +17,7 @@ const AGENT_NAME_MAP: Record<string, string> = {
   debugger: '调试员',
   codeaudit: '代码审计',
   cron: '巡检员',
+  testing: '测试',
 }
 
 // Types
@@ -61,15 +62,21 @@ export interface GlobalUsage {
   totalTokens: number
   totalCost: number
   updatedAt: string
+  startTime?: string  // Gateway or service start time (for uptime calculation)
+  uptimeMs?: number   // Service uptime in milliseconds
 }
 
 export const useAgentStore = defineStore('agent', () => {
   const agents = ref<AgentInfo[]>([])
   const globalUsage = ref<GlobalUsage>({ totalTokens: 0, totalCost: 0, updatedAt: '' })
-  const healthStatus = ref<Record<string, unknown>>({})
+  const healthStatus = ref<string>('unknown')
+  const gatewayUptimeMs = ref<number>(0) // Gateway uptime from API
   const filterStatus = ref<FilterStatus>('all')
   const isPolling = ref(false)
   const lastUpdateTime = ref(0)
+  // 动态 Agent 名称映射:API 优先,硬编码降级
+  const agentNameMap = ref<Record<string, string>>({ ...AGENT_NAME_MAP })
+  const agentNameMapLoaded = ref(false)
 
   // Computed
   const runningAgents = computed(() => agents.value.filter((a) => a.status === 'running'))
@@ -87,42 +94,68 @@ export const useAgentStore = defineStore('agent', () => {
     return agents.value.filter((a) => a.status === filterStatus.value)
   })
 
-  // Oldest session time (for uptime calculation)
-  const oldestSessionTime = computed(() => {
+  // ============================================
+  // 核心指标计算 - 统一维度:本次 Gateway 启动至今
+  // 参考:https://clawcn.net/gateway/
+  // ============================================
+
+  // 1. 运行时间 (uptime) - Gateway 从启动至今的毫秒数
+  // 数据来源(优先级从高到低):
+  //   Priority 1: Gateway /health 返回的 uptimeMs(预留接口,当前 Gateway 不返回此字段)
+  //   Priority 2: usage-stats 返回的 uptimeMs(预留接口,当前服务不返回此字段)
+  //   Fallback: 从最早 agent 会话时间推算(默认路径,精度 ≈ 分钟级,偏差来自会话创建延迟)
+  const uptimeMs = computed(() => {
+    // Priority 1: Gateway /health 返回的 uptimeMs(若 Gateway 支持)
+    // fetchGatewayUptime() 会尝试提取,但当前 Gateway 不返回此字段
+    if (gatewayUptimeMs.value > 0) {
+      return gatewayUptimeMs.value
+    }
+    // Priority 2: usage-stats 服务返回的 uptimeMs(若服务支持)
+    // 当前 usage-stats 不返回此字段,保留接口以备未来
+    if (globalUsage.value.uptimeMs && globalUsage.value.uptimeMs > 0) {
+      return globalUsage.value.uptimeMs
+    }
+    // Fallback: 从最早 agent 会话时间推算(默认路径,精度 ≈ 分钟级)
     if (agents.value.length === 0) return 0
     const times = agents.value.map((a) => {
       if (a.createdAt) return new Date(a.createdAt).getTime()
       return a.lastActivity || 0
     }).filter((t) => t > 0)
     if (times.length === 0) return 0
-    return Math.min(...times)
+    const oldestSessionTime = Math.min(...times)
+    return Date.now() - oldestSessionTime
   })
 
-  // Uptime in milliseconds
-  const uptimeMs = computed(() => {
-    if (oldestSessionTime.value === 0) return 0
-    return Date.now() - oldestSessionTime.value
-  })
-
-  // Total token consumption - sum of all sessions' totalTokens
+  // 2. 总 Token 用量 - Gateway 从启动至今的累计
+  // 数据来源:usage-stats 服务统计的全局用量
   const totalTokensUsed = computed(() => {
+    // Priority 1: usage-stats 服务的全局用量(Gateway 启动至今的累计)
+    if (globalUsage.value.totalTokens > 0) {
+      return globalUsage.value.totalTokens
+    }
+    // Fallback: 累加当前所有会话的用量(降级方案)
     return agents.value.reduce((sum, s) => {
       const t = Number(s.totalTokens) || 0
       return sum + t
     }, 0)
   })
 
-  // Total cost = OpenClaw's tracked cost + electricity
-  // OpenClaw cost: from usage-stats service (message.usage.cost.total)
-  // Electricity cost: ¥2 per hour of uptime
-  const ELECTRICITY_PER_HOUR = 2
+  // 3. 总费用 - Gateway 从启动至今的累计
+  // 计算公式:总费用 = OpenClaw API 费用 + 电费
+  // 电费系数通过 VITE_ELECTRICITY_PER_HOUR 环境变量配置,默认 ¥2/小时
+  // 使用显式检查避免 || 运算符误判 0 值(Number("0") || 2 → 2)
+  const raw = import.meta.env.VITE_ELECTRICITY_PER_HOUR
+  const parsed = raw === undefined || raw === '' ? undefined : Number(raw)
+  const ELECTRICITY_PER_HOUR = (typeof parsed === 'number' && !isNaN(parsed)) ? parsed : 2
 
   const totalCostCny = computed(() => {
-    // OpenClaw's actual cost (if available)
+    // OpenClaw API 实际费用(usage-stats 统计的 Gateway 启动至今的费用)
     const openclawCost = globalUsage.value.totalCost || 0
-    // Electricity cost: uptime hours * 2
+
+    // 电费 = 运行时长 × 每小时电费
     const uptimeHours = uptimeMs.value / (1000 * 60 * 60)
     const electricityCost = uptimeHours * ELECTRICITY_PER_HOUR
+
     return openclawCost + electricityCost
   })
 
@@ -136,11 +169,11 @@ export const useAgentStore = defineStore('agent', () => {
    */
   function formatUptime(ms: number): string {
     if (ms <= 0) return '未知'
-    
+
     const totalSeconds = Math.floor(ms / 1000)
     const hours = Math.floor(totalSeconds / 3600)
     const minutes = Math.floor((totalSeconds % 3600) / 60)
-    
+
     if (hours > 0) {
       return `${hours}小时${minutes}分钟`
     } else if (minutes > 0) {
@@ -155,12 +188,12 @@ export const useAgentStore = defineStore('agent', () => {
    */
   function formatDuration(ms: number): string {
     if (!ms || ms <= 0) return '-'
-    
+
     const totalSeconds = Math.floor(ms / 1000)
     const hours = Math.floor(totalSeconds / 3600)
     const minutes = Math.floor((totalSeconds % 3600) / 60)
     const seconds = totalSeconds % 60
-    
+
     if (hours > 0) {
       return `${hours}小时${minutes}分${seconds}秒`
     } else if (minutes > 0) {
@@ -187,26 +220,28 @@ export const useAgentStore = defineStore('agent', () => {
 
     const rawKey = str(item.key ?? item.sessionKey ?? item.id)
 
-    // Force use Chinese name mapping
+    // Force use Chinese name mapping (动态映射优先,硬编码降级)
+    const map = agentNameMap.value
+
     // Step 1: Try direct lookup (rawKey might be "main", "recorder", etc.)
-    let agentName = AGENT_NAME_MAP[rawKey] || ''
+    let agentName = map[rawKey] || ''
 
     // Step 2: If not found, try extract from "agent:main:default" format
     if (!agentName && rawKey.includes(':')) {
       const parts = rawKey.split(':')
       // "agent:main:default" -> parts[1] = "main"
       if (parts.length >= 2 && parts[0] === 'agent') {
-        agentName = AGENT_NAME_MAP[parts[1]] || parts[1]
+        agentName = map[parts[1]] || parts[1]
       } else if (parts.length >= 1) {
         // Try first part or last part
-        agentName = AGENT_NAME_MAP[parts[0]] || AGENT_NAME_MAP[parts[parts.length - 1]] || parts[parts.length - 1]
+        agentName = map[parts[0]] || map[parts[parts.length - 1]] || parts[parts.length - 1]
       }
     }
 
     // Step 3: Handle cron sessions
     if (!agentName && rawKey.includes('cron:')) {
       const cronMatch = rawKey.match(/cron:(.+?)$/)
-      agentName = cronMatch ? '定时任务：' + cronMatch[1] : '定时任务'
+      agentName = cronMatch ? '定时任务:' + cronMatch[1] : '定时任务'
     }
 
     // Step 4: Final fallback
@@ -225,7 +260,7 @@ export const useAgentStore = defineStore('agent', () => {
     const aborted = abortedRaw === 'true' || item.abortedLastRun === true
     if (aborted) {
       derivedStatus = 'aborted'
-    } 
+    }
     // 2) Check if error
     else if (item.error || item.lastError || item.errorMessage) {
       derivedStatus = 'error'
@@ -261,7 +296,7 @@ export const useAgentStore = defineStore('agent', () => {
     const totalTokens = num(item.totalTokens)
     const contextTokens = num(item.contextTokens)
     let tokenUsage: AgentInfo['tokenUsage'] | undefined
-    
+
     if (totalTokens > 0 && contextTokens > 0) {
       tokenUsage = {
         current: totalTokens,
@@ -350,8 +385,16 @@ export const useAgentStore = defineStore('agent', () => {
         totalTokens: data.totalTokens || 0,
         totalCost: data.totalCost || 0,
         updatedAt: data.updatedAt || '',
+        startTime: (data as any).startTime,  // Extract start time if available
+        uptimeMs: (data as any).uptimeMs,    // Extract uptime if available
       }
       console.log('[AgentStore] Global usage loaded:', data.totalTokens, 'tokens, cost:', data.totalCost)
+
+      // If usage-stats provides uptime, use it to sync with gateway uptime
+      if ((data as any).uptimeMs && (data as any).uptimeMs > 0) {
+        gatewayUptimeMs.value = (data as any).uptimeMs
+        console.log('[AgentStore] Gateway uptime synced from usage-stats:', gatewayUptimeMs.value, 'ms')
+      }
     } catch (e) {
       console.warn('[AgentStore] fetchGlobalUsage error:', e)
     }
@@ -359,9 +402,82 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function fetchHealth(): Promise<void> {
     try {
-      healthStatus.value = await health()
+      const data = await health()
+      const typed = data as Record<string, unknown>
+      // /health 返回 { ok: true, status: "live" }
+      // 映射 Gateway 的 status/ok 值到 UI 期望的值
+      const raw = String(typed.status ?? '')
+      const isOk = typed.ok === true || typed.ok === 'true'
+      if (isOk || raw === 'ok' || raw === 'live') {
+        healthStatus.value = 'healthy'
+      } else if (raw === 'error') {
+        healthStatus.value = 'unhealthy'
+      } else {
+        healthStatus.value = 'unknown'
+      }
     } catch (e) {
       console.warn('[AgentStore] fetchHealth error:', e)
+      healthStatus.value = 'unhealthy' // 请求失败视为不健康
+    }
+  }
+
+  async function fetchGatewayUptime(): Promise<void> {
+    try {
+      const data = await health()
+      const typed = data as Record<string, unknown>
+
+      // 当前 Gateway /health 不返回 uptimeMs/uptime/bootTime 字段
+      // 保留解析逻辑以备未来 Gateway 支持这些字段
+      const uptimeMs = typed.uptimeMs ?? typed.uptime ?? typed.bootTime ?? typed.startTime
+
+      if (typeof uptimeMs === 'number' && uptimeMs > 0) {
+        gatewayUptimeMs.value = uptimeMs
+        console.log('[AgentStore] Gateway uptime loaded:', uptimeMs, 'ms')
+      } else if (typeof uptimeMs === 'string') {
+        // If uptime is a string (ISO date), convert to ms
+        const ms = new Date(uptimeMs).getTime()
+        if (!isNaN(ms)) {
+          gatewayUptimeMs.value = Date.now() - ms
+          console.log('[AgentStore] Gateway uptime calculated from string:', gatewayUptimeMs.value, 'ms')
+        }
+      } else {
+        // If no uptime field found, reset to 0 to trigger fallback
+        console.warn('[AgentStore] Gateway uptime not found in health response, using fallback')
+        gatewayUptimeMs.value = 0
+      }
+    } catch (e) {
+      console.warn('[AgentStore] fetchGatewayUptime error:', e)
+      // On error, reset to 0 to trigger fallback logic
+      gatewayUptimeMs.value = 0
+    }
+  }
+
+  /**
+   * 动态获取 Agent 名称映射(agentsList API)
+   * 成功:用 API 返回覆盖 agentNameMap
+   * 失败:保持硬编码降级值不变
+   */
+  async function fetchAgentNames(): Promise<void> {
+    if (agentNameMapLoaded.value) return // 只调用一次
+    try {
+      const data = await agentsList()
+      if (Array.isArray(data)) {
+        const dynamicMap: Record<string, string> = {}
+        for (const item of data) {
+          const typed = item as Record<string, unknown>
+          const id = String(typed.id ?? typed.agentId ?? typed.key ?? '')
+          const name = String(typed.name ?? typed.label ?? typed.displayName ?? '')
+          if (id && name) {
+            dynamicMap[id] = name
+          }
+        }
+        // 合并:动态映射优先,硬编码作为降级
+        agentNameMap.value = { ...AGENT_NAME_MAP, ...dynamicMap }
+        agentNameMapLoaded.value = true
+        console.log('[AgentStore] Agent names loaded from API:', dynamicMap)
+      }
+    } catch (e) {
+      console.warn('[AgentStore] Failed to load agent names from API, using hardcoded map:', e)
     }
   }
 
@@ -369,7 +485,12 @@ export const useAgentStore = defineStore('agent', () => {
     try {
       await resetSessionApi(sessionKey)
       console.log(`[AgentStore] Reset session ${sessionKey} via sessions_send API`)
-    } catch (e) {
+    } catch (e: any) {
+      // 保留 ToolRestrictedError 的语义,向上层传递
+      if (e instanceof ToolRestrictedError) {
+        console.warn(`[AgentStore] resetSession(${sessionKey}) blocked: ${e.tool} 不可用`)
+        throw e
+      }
       console.error(`[AgentStore] resetSession(${sessionKey}) error:`, e)
       throw e
     }
@@ -398,12 +519,13 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function subscribeAgents(): Promise<() => void> {
     isPolling.value = true
-    await Promise.all([fetchAgents(), fetchGlobalUsage(), fetchHealth()])
+    await Promise.all([fetchAgents(), fetchGlobalUsage(), fetchHealth(), fetchGatewayUptime(), fetchAgentNames()])
 
     const interval = setInterval(() => {
       if (!isPolling.value) return
       fetchAgents()
       fetchGlobalUsage()
+      fetchGatewayUptime() // Also refresh gateway uptime
     }, AGENT_POLL_INTERVAL)
 
     const healthInterval = setInterval(() => {
@@ -427,7 +549,9 @@ export const useAgentStore = defineStore('agent', () => {
     agents,
     globalUsage,
     healthStatus,
+    gatewayUptimeMs,
     filterStatus,
+    agentNameMap,
     isPolling,
     lastUpdateTime,
     // Computed
@@ -439,7 +563,6 @@ export const useAgentStore = defineStore('agent', () => {
     totalAgents,
     activeAgents,
     filteredAgents,
-    oldestSessionTime,
     uptimeMs,
     totalTokensUsed,
     totalCostCny,
@@ -453,6 +576,8 @@ export const useAgentStore = defineStore('agent', () => {
     fetchAgentStatus,
     fetchGlobalUsage,
     fetchHealth,
+    fetchGatewayUptime,
+    fetchAgentNames,
     resetSession,
     fetchSessionHistory,
     subscribeAgents,

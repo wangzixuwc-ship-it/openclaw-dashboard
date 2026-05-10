@@ -174,6 +174,7 @@
 import { ref, computed, watch, type Component } from 'vue'
 import type { AgentInfo } from '../stores/agent'
 import { useAgentStore } from '../stores/agent'
+import { ToolRestrictedError } from '../api/gateway'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   UserFilled,
@@ -409,16 +410,57 @@ async function handleResetSession(): Promise<void> {
   } catch (e: any) {
     if (e !== 'cancel') {
       const errorMsg = e?.message || String(e)
+      const errorCode = e?.code
       let userMessage = '重置会话失败'
-      
-      // Check for specific scope errors
-      if (errorMsg.includes('missing scope: operator.write')) {
-        userMessage = '权限不足：需要 operator.write 权限。请在 Gateway 配置中设置 gateway.controlUi.dangerouslyDisableDeviceAuth: true 并重启 Gateway，或者使用 openclaw devices approve --latest 批准设备配对请求。'
-      } else if (errorMsg.includes('Tool not available') || errorMsg.includes('sessions_send')) {
-        userMessage = 'sessions_send 工具不可用。请检查 Gateway 配置，确保启用了 sessions_send 工具，或者在 Gateway 配置中设置 gateway.controlUi.dangerouslyDisableDeviceAuth: true 并重启 Gateway。'
+      let configSteps: string[] = []
+
+      // 1. 前置检测抛出的结构化错误
+      if (e instanceof ToolRestrictedError || errorCode === 'TOOLS_RESTRICTED') {
+        const toolName = e?.tool || 'sessions_send'
+        userMessage = `⚠️ ${toolName} 工具不可用\n\nGateway 安全策略 (gateway.tools) 默认为 deny-allowlist 模式，\n未将 ${toolName} 加入允许列表。`
+        configSteps = e?.steps || [
+          '1. 编辑 Gateway 配置文件 (openclaw.yaml)',
+          '2. 添加 gateway.tools.allow 配置',
+          '3. 重启 Gateway',
+        ]
       }
-      
-      ElMessage.error(userMessage)
+      // 2. 权限不足：operator.write scope
+      else if (errorMsg.includes('missing scope: operator.write')) {
+        userMessage = '权限不足：需要 operator.write 权限。请在 Gateway 配置中设置 gateway.controlUi.dangerouslyDisableDeviceAuth: true 并重启 Gateway，或者使用 openclaw devices approve --latest 批准设备配对请求。'
+      }
+      // 3. 工具被拒绝（广义关键词匹配）
+      else if (/tool.*(not\s+)?available|sessions_send.*(denied|rejected|forbidden)|invoke.*(denied|rejected)|tools.*restrict|403|denied|forbidden/i.test(errorMsg)) {
+        userMessage = `⚠️ sessions_send 工具不可用\n\nGateway 安全策略拒绝了该工具调用。`
+        configSteps = [
+          '1. 编辑 Gateway 配置文件 (openclaw.yaml / .openclaw.yaml)',
+          '2. 添加以下配置：',
+          '   gateway:',
+          '     tools:',
+          '       allow:',
+          '         - sessions_send',
+          '3. 重启 Gateway：openclaw gateway restart',
+          '4. 配置文件路径：OpenClaw 安装目录下的 openclaw.yaml',
+        ]
+      }
+
+      // 如果有配置步骤，用弹窗展示更详细的信息
+      if (configSteps.length > 0) {
+        await ElMessageBox.alert(
+          `<div style="line-height:1.8;white-space:pre-wrap">${userMessage.replace(/\n/g, '<br/>')}</div>` +
+          `<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eee;">` +
+          `<strong>解决方法：</strong></div>` +
+          configSteps.map((s) => `<div style="margin-top:6px">${s.replace(/\n/g, '<br/>')}</div>`).join(''),
+          '重置失败',
+          {
+            confirmButtonText: '我知道了',
+            type: 'warning',
+            dangerouslyUseHTMLString: true,
+          }
+        ).catch(() => {}) // 忽略关闭弹窗
+      } else {
+        ElMessage.error(userMessage.replace(/\n/g, ' '))
+      }
+
       console.error('[AgentDetailDrawer] resetSession error:', e)
     }
   } finally {
