@@ -7,13 +7,18 @@
 import http from 'http'
 import fs from 'fs/promises'
 import path from 'path'
+import os from 'os'
+import dotenv from 'dotenv'
 import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// OpenClaw 数据目录
-const OPENCLAW_DIR = path.join(process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\yc', '.openclaw')
+// 加载 .env 文件（与 Dashboard 前端配置一致）
+dotenv.config({ path: path.join(__dirname, '..', '.env') })
+
+// OpenClaw 数据目录（动态路径，无硬编码）
+const OPENCLAW_DIR = path.join(process.env.USERPROFILE || process.env.HOME || os.homedir(), '.openclaw')
 const AGENTS_DIR = path.join(OPENCLAW_DIR, 'agents')
 
 // 端口号
@@ -23,6 +28,9 @@ const PORT = process.env.USAGE_STATS_PORT || 3001
 let cachedResult = null
 let lastUpdate = 0
 const CACHE_TTL = 10000 // 10秒缓存
+
+// 版本号：从 .env 读取 VITE_OPENCLAW_VERSION（与 Dashboard 前端一致，REC-093）
+const openclawVersion = process.env.VITE_OPENCLAW_VERSION || 'unknown'
 
 /**
  * 解析 .jsonl 文件，累加 token 用量
@@ -148,7 +156,7 @@ async function collectUsageStats() {
       totalCost,
       byAgent,
       updatedAt: new Date().toISOString(),
-      version: '2026.3.13'
+      version: openclawVersion // 动态版本号（REC-092）
     }
     lastUpdate = now
     
@@ -202,9 +210,11 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ error: 'Method not allowed' }))
 })
 
+// 服务器启动
 server.listen(PORT, () => {
   console.log(`\n🦞 OpenClaw Usage Stats Service`)
   console.log(`   Port: ${PORT}`)
+  console.log(`   Version: ${openclawVersion}`)
   console.log(`   OpenClaw Dir: ${OPENCLAW_DIR}`)
   console.log(`   API: http://localhost:${PORT}/api/usage`)
   console.log(`   Health: http://localhost:${PORT}/api/health`)
