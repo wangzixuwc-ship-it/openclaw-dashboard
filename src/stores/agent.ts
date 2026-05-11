@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { sessionsList, sessionStatus, health, sessionsHistory, resetSession as resetSessionApi, agentsList } from '../api/gateway'
+import { sessionsList, sessionStatus, health, sessionsHistory, agentsList } from '../api/gateway'
 import { getUsageStats } from '../api/usage-stats'
 
 // Constants
@@ -503,8 +503,38 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function resetSession(sessionKey: string): Promise<void> {
     try {
-      await resetSessionApi(sessionKey)
-      console.log(`[AgentStore] Reset session ${sessionKey} via WebSocket chat.send`)
+      // 从 sessionKey 中提取 agent id
+      // 格式：agent:<id>:<channel> 或 agent:<id>
+      let agentId = sessionKey
+      if (sessionKey.includes(':')) {
+        const parts = sessionKey.split(':')
+        if (parts[0] === 'agent' && parts.length >= 2) {
+          agentId = parts[1]
+        }
+      }
+      
+      // 调用 Reset Agent Service 执行命令行
+      const serviceUrl = import.meta.env.VITE_RESET_AGENT_SERVICE_URL || 'http://localhost:3002'
+      const url = `${serviceUrl}/reset`
+      
+      console.log(`[AgentStore] Calling reset service: ${url}`)
+      console.log(`[AgentStore] Agent ID: ${agentId}`)
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ agentId }),
+      })
+      
+      const result = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`)
+      }
+      
+      console.log(`[AgentStore] Reset session ${sessionKey} via CLI command, result:`, result)
     } catch (e: any) {
       console.error(`[AgentStore] resetSession(${sessionKey}) error:`, e)
       throw e
