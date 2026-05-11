@@ -33,29 +33,18 @@ if not exist "node_modules" (
 )
 
 echo ========================================
-echo [1/3] 正在启动 Usage Stats Service...
+echo [1/2] 正在启动 Agent Service...
 echo ========================================
 echo.
 
-REM 启动 Usage Stats Service（后台运行）
-start "Usage Stats Service" /min node scripts/usage-stats.js
+REM 启动 Agent Service（后台运行）
+start "Agent Service" /min node scripts/agent-service.js
 timeout /t 2 /nobreak >nul
-echo [成功] Usage Stats Service 已启动（端口 3001）
+echo [成功] Agent Service 已启动（端口 3001）
 echo.
 
 echo ========================================
-echo [2/3] 正在启动 Agent Reset Service...
-echo ========================================
-echo.
-
-REM 启动 Reset Service（后台运行）
-start "Agent Reset Service" /min node scripts/reset-agent-service.js
-timeout /t 2 /nobreak >nul
-echo [成功] Agent Reset Service 已启动（端口 3002）
-echo.
-
-echo ========================================
-echo [3/3] 正在启动 Dashboard...
+echo [2/2] 正在启动 Dashboard...
 echo ========================================
 echo [提示] 按 Ctrl+C 可停止 Dashboard
 echo.
