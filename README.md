@@ -10,7 +10,17 @@
 
 # 启动
 
-运行 `start.bat` 即可启动。
+**方式一**：运行 `start.bat` 即可启动（推荐）
+
+**方式二**：命令行启动
+```bash
+# 启动统一服务（端口 31002）和前端（端口 31001）
+npm run start:all
+
+# 或分别启动
+node scripts/unified-service.js  # 统一服务
+npm run dev                      # 前端
+```
 
 # 配置
 在 `.env` 文件中配置 OpenClaw 系统的 API 地址、Token、电费单价、OpenClaw 版本、Agent 中文称呼等。

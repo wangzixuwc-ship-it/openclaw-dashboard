@@ -100,14 +100,14 @@
         </div>
       </el-card>
 
-      <!-- 最近消息预览 -->
+      <!-- 消息预览 -->
       <el-card class="detail-section" shadow="never">
         <template #header>
           <div class="section-header">
             <el-icon><ChatDotRound /></el-icon>
-            最近消息
+            消息
             <span class="msg-count" v-if="recentMessages.length > 0">
-              （最近 {{ recentMessages.length }} 条，共 {{ historyCount }} 条）
+              （{{ recentMessages.length }} 条）
             </span>
           </div>
         </template>
@@ -120,17 +120,14 @@
         <el-empty v-else-if="recentMessages.length === 0" description="暂无消息" :image-size="60" />
 
         <div v-else class="messages-list">
+          <!-- 用户消息：右对齐蓝色气泡 -->
           <div
             v-for="(msg, idx) in recentMessages"
             :key="idx"
-            class="message-item"
-            :class="messageClass(msg)"
+            class="chat-row"
+            :class="msg.role === 'user' ? 'chat-row-user' : 'chat-row-assistant'"
           >
-            <div class="msg-role">
-              <el-icon><component :is="roleIcon(msg)" /></el-icon>
-              <span>{{ msg.role }}</span>
-            </div>
-            <div class="msg-content" :title="truncate(msg.content, 200)">
+            <div class="chat-bubble" :class="msg.role === 'user' ? 'bubble-user' : 'bubble-assistant'" :title="truncate(msg.content, 200)">
               {{ truncate(msg.content, 200) }}
             </div>
           </div>
@@ -352,9 +349,59 @@ function formatTime(dateStr: string): string {
   }
 }
 
+function cleanContent(raw: string): string {
+  if (!raw) return ''
+  let text = raw
+  // 1. 移除 thinking 标签及内容
+  text = text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+  // 2. 移除 antThinking 标签及内容
+  text = text.replace(/<antThinking>[\s\S]*?<\/antThinking>/gi, '')
+  // 3. 移除 tool_call 标签及内容（XML 风格）
+  text = text.replace(/<tool_call[\s\S]*?<\/tool_call>/gi, '')
+  // 4. 移除 tool_call 标签及内容（XML processing instruction 风格）
+  text = text.replace(/<\?tool_call[\s\S]*?<\/tool_call>/gi, '')
+  // 5. 移除多余空白行
+  text = text.replace(/^\s*[\r\n]+/gm, '').trim()
+  return text
+}
+
 function truncate(str: string, len: number): string {
   if (!str) return ''
   return str.length > len ? str.slice(0, len) + '...' : str
+}
+
+/**
+ * 从 content 字段提取纯文本内容
+ * 兼容多种格式：
+ * 1. 字符串：直接返回
+ * 2. 对象数组：[{"type":"text","text":"..."}, {"type":"thinking","thinking":"..."}, ...]
+ * 3. 单个对象：{"text":"..."} 或 {"content":"..."}
+ * 4. 其他：转为字符串
+ */
+function extractTextContent(content: unknown): string {
+  // 1. 字符串直接返回
+  if (typeof content === 'string') return content
+  
+  // 2. 对象数组：提取 type==="text" 的 text 字段
+  if (Array.isArray(content)) {
+    const textParts = content
+      .filter((item: Record<string, unknown>) => {
+        const type = String(item.type ?? '')
+        return type === 'text'
+      })
+      .map((item: Record<string, unknown>) => String(item.text ?? item.content ?? ''))
+      .join('\n')
+    return textParts.trim()
+  }
+  
+  // 3. 单个对象：尝试提取 text 或 content 字段
+  if (content && typeof content === 'object') {
+    const obj = content as Record<string, unknown>
+    return String(obj.text ?? obj.content ?? '')
+  }
+  
+  // 4. 其他情况转为字符串
+  return String(content ?? '')
 }
 
 // Actions
@@ -365,13 +412,32 @@ async function loadHistory(): Promise<void> {
     const history = await store.fetchSessionHistory(agent.value.key)
     historyCount.value = history.length
 
-    // Normalize and take last 5
-    const normalized = (history as Record<string, unknown>[]).map((item) => ({
-      role: (item.role ?? item.sender ?? 'unknown') as string,
-      content: (item.content ?? item.message ?? item.text ?? '') as string,
-    }))
+    // 1. 过滤 tool 相关消息
+    const TOOL_ROLES = ['tool', 'tool_calls', 'tool_result', 'function', 'assistant_tool']
+    const filtered = (history as Record<string, unknown>[]).filter((item) => {
+      const role = String(item.role ?? item.sender ?? '').toLowerCase()
+      return !TOOL_ROLES.includes(role)
+    })
 
-    recentMessages.value = normalized.slice(-5).reverse()
+    // 2. 归一化 + 清洗 assistant 消息
+    const normalized = filtered.map((item) => {
+      const role = String(item.role ?? item.sender ?? '').toLowerCase()
+      let content = extractTextContent(item.content)
+
+      // assistant 消息清洗 thinking 标签
+      if (role === 'assistant') {
+        content = cleanContent(content)
+      }
+
+      return {
+        role: ['user', 'assistant', 'system'].includes(role) ? role : 'assistant',
+        content,
+      }
+    })
+
+    // 3. 过滤清洗后为空的，显示全部消息（REC-100）
+    const cleanMessages = normalized.filter((msg) => msg.content.length > 0)
+    recentMessages.value = cleanMessages.reverse()
   } finally {
     loadingHistory.value = false
   }
@@ -596,52 +662,52 @@ watch(drawerVisible, (val) => {
   margin-top: 8px;
 }
 
-/* Messages list */
+/* Messages list — 聊天气泡样式 */
 .messages-list {
   max-height: 320px;
   overflow-y: auto;
-}
-
-.message-item {
   display: flex;
-  gap: 10px;
-  padding: 10px;
-  margin-bottom: 8px;
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-color);
-  transition: background 0.2s;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.message-item:hover {
-  background: var(--bg-secondary);
-}
-
-.msg-role {
+.chat-row {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  flex-shrink: 0;
-  padding-top: 2px;
-  color: var(--accent);
 }
 
-.msg-content {
+.chat-row-user {
+  justify-content: flex-end;
+}
+
+.chat-row-assistant {
+  justify-content: flex-start;
+}
+
+.chat-bubble {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--text-primary);
   word-break: break-word;
+  position: relative;
 }
 
-/* Message role colors */
-.msg-user .msg-role { color: var(--el-color-primary); }
-.msg-assistant .msg-role { color: var(--el-color-success); }
-.msg-system .msg-role { color: var(--el-color-warning); }
-.msg-other .msg-role { color: var(--el-text-color-secondary); }
+/* 用户消息：蓝色气泡，右对齐 */
+.bubble-user {
+  background: #42a5f5;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+/* AI 回复：灰色气泡，左对齐 */
+.bubble-assistant {
+  background: #2d3748;
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+}
+
+/* 移除旧的消息样式 */
 
 /* Text colors */
 .text-success { color: var(--el-color-success); }

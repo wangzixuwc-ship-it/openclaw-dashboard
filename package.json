@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start:all": "node scripts/unified-service.js & vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint . --fix",

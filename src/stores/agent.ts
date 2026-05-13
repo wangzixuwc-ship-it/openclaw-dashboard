@@ -569,7 +569,7 @@ export const useAgentStore = defineStore('agent', () => {
     return agent || null
   }
 
-  async function fetchSessionHistory(sessionKey: string, limit: number = 50): Promise<Record<string, unknown>[]> {
+  async function fetchSessionHistory(sessionKey: string, limit: number = 100): Promise<Record<string, unknown>[]> {
     try {
       const data = await sessionsHistory(sessionKey, { limit })
       if (Array.isArray(data)) return data as Record<string, unknown>[]

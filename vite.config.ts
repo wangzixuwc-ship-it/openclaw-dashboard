@@ -8,8 +8,12 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const gatewayUrl = env.VITE_GATEWAY_URL || 'http://127.0.0.1:18789'
+  const frontendPort = parseInt(process.env.FRONTEND_PORT || '31001', 10)
+  const backendPort = 31002 // 统一服务端口 (合并了 GPU VRAM + Usage Stats + Reset Agent)
 
   console.log('[Vite] Gateway URL:', gatewayUrl)
+  console.log('[Vite] Frontend Port:', frontendPort)
+  console.log('[Vite] Backend Port (for proxy):', backendPort)
 
   return {
     plugins: [
@@ -23,16 +27,16 @@ export default defineConfig(({ mode }) => {
     ],
     server: {
       host: '0.0.0.0',
-      port: 31001,
+      port: frontendPort,
       proxy: {
         '/api/gpu-vram': {
-          // REC-096: GPU VRAM 专用后端 (NestJS)
-          target: 'http://localhost:31004',
+          // GPU VRAM 统一服务 (端口 31002)
+          target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },
-        '/gpu-vram': {
-          // REC-097: 合并后端代理 (Usage Stats + Reset Agent + GPU VRAM)
-          target: 'http://localhost:31004',
+        '/api/usage': {
+          // Usage Stats 统一服务 (端口 31002)
+          target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },
         '/api': {
