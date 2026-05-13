@@ -23,6 +23,19 @@
             <span class="indicator-value">{{ healthDisplay }}</span>
           </div>
 
+          <!-- GPU VRAM Usage (REC-091) -->
+          <el-tooltip
+            v-if="store.gpuVramPercentage !== null && store.gpuVramPercentage !== undefined"
+            :content="`${store.gpuVramUsedMb} / ${store.gpuVramTotalMb} MB`"
+            placement="bottom"
+          >
+            <div class="indicator indicator-gpu">
+              <el-icon :size="14"><Monitor /></el-icon>
+              <span class="indicator-label">显存</span>
+              <span class="indicator-value">{{ store.gpuVramPercentage }}%</span>
+            </div>
+          </el-tooltip>
+
           <!-- Refresh Button -->
           <el-button
             :icon="Refresh"
@@ -433,6 +446,22 @@ onUnmounted(() => {
 
 .indicator-version .indicator-value {
   color: #90caf9;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+}
+
+.indicator-gpu {
+  background: rgba(156, 39, 176, 0.15);
+  border-color: rgba(156,39,176,0.3) !important;
+}
+
+.indicator-gpu .indicator-label {
+  color: #ce93d8;
+  font-weight: 600;
+}
+
+.indicator-gpu .indicator-value {
+  color: #e1bee7;
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   font-size: 11px;
 }

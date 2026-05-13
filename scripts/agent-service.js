@@ -1,7 +1,7 @@
 /**
  * OpenClaw Agent Service
  * 综合服务：提供 Usage Stats 和 Reset Agent 功能
- * 端口：3001
+ * 端口：31002
  */
 
 import http from 'http'
@@ -24,7 +24,7 @@ const OPENCLAW_DIR = path.join(process.env.USERPROFILE || process.env.HOME || os
 const AGENTS_DIR = path.join(OPENCLAW_DIR, 'agents')
 
 // 端口号
-const PORT = process.env.AGENT_SERVICE_PORT || 3001
+const PORT = process.env.AGENT_SERVICE_PORT || 31002
 
 // 缓存结果
 let cachedUsageResult = null
@@ -327,8 +327,8 @@ server.listen(PORT, () => {
   console.log('  POST /reset        - 重置 Agent')
   console.log('')
   console.log('使用示例:')
-  console.log('  curl http://localhost:3001/api/usage')
-  console.log('  curl -X POST http://localhost:3001/reset ^')
+  console.log('  curl http://localhost:31002/api/usage')
+  console.log('  curl -X POST http://localhost:31002/reset ^')
   console.log('    -H "Content-Type: application/json" ^')
   console.log('    -d \'{"agentId": "main"}\'')
   console.log('')

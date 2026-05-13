@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { sessionsList, sessionStatus, health, sessionsHistory, agentsList } from '../api/gateway'
+import { sessionsList, sessionStatus, health, sessionsHistory, agentsList, getGpuVramUsage } from '../api/gateway'
 import { getUsageStats } from '../api/usage-stats'
 
 // Constants
 const HEALTH_CHECK_INTERVAL = 10000 // 10s
 const AGENT_POLL_INTERVAL = 10000 // 10s
+const GPU_POLL_INTERVAL = 30000 // 30s (REC-091)
 const STORAGE_KEY = 'openclaw_dashboard_agent_filter'
 
 // Types
@@ -60,6 +61,9 @@ export const useAgentStore = defineStore('agent', () => {
   const healthStatus = ref<string>('unknown')
   const gatewayUptimeMs = ref<number>(0) // Gateway uptime from API
   const gatewayVersion = ref<string>(import.meta.env.VITE_OPENCLAW_VERSION || '') // Gateway version from /health, fallback from env (REC-089)
+  const gpuVramPercentage = ref<number | null>(null) // GPU 显存使用占比 (REC-091)
+  const gpuVramUsedMb = ref<number>(0) // GPU 已用显存 MB (REC-096)
+  const gpuVramTotalMb = ref<number>(0) // GPU 总显存 MB (REC-096)
   // Fallback: use env var if /health doesn't return version (REC-089 fix)
   const fallbackVersion = import.meta.env.VITE_OPENCLAW_VERSION || ''
   const filterStatus = ref<FilterStatus>('all')
@@ -475,6 +479,25 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /**
+   * 获取 GPU 显存使用占比 (REC-091 / REC-096)
+   * 通过 /api/gpu-vram 后端 API 获取
+   * 返回: { usedPct, usedMb, totalMb }
+   */
+  async function fetchGpuVram(): Promise<void> {
+    try {
+      const data = await getGpuVramUsage()
+      if (data) {
+        gpuVramPercentage.value = data.usedPct
+        gpuVramUsedMb.value = data.usedMb
+        gpuVramTotalMb.value = data.totalMb
+        console.log(`[AgentStore] GPU VRAM: ${data.usedPct}% (${data.usedMb}/${data.totalMb} MB)`)
+      }
+    } catch (e) {
+      console.warn('[AgentStore] fetchGpuVram error:', e)
+    }
+  }
+
+  /**
    * 动态获取 Agent 名称映射(agentsList API)
    * API 成功 → 覆盖为 API 数据；失败 → 保留 .env 配置化降级（REC-091）
    */
@@ -513,9 +536,9 @@ export const useAgentStore = defineStore('agent', () => {
         }
       }
       
-      // 调用 Reset Agent Service 执行命令行
-      const serviceUrl = import.meta.env.VITE_RESET_AGENT_SERVICE_URL || 'http://localhost:3002'
-      const url = `${serviceUrl}/reset`
+      // REC-097: 调用合并后的后端服务 (端口 31004)
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:31004'
+      const url = `${backendUrl}/reset`
       
       console.log(`[AgentStore] Calling reset service: ${url}`)
       console.log(`[AgentStore] Agent ID: ${agentId}`)
@@ -564,7 +587,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function subscribeAgents(): Promise<() => void> {
     isPolling.value = true
-    await Promise.all([fetchAgents(), fetchGlobalUsage(), fetchHealth(), fetchGatewayUptime(), fetchAgentNames()])
+    await Promise.all([fetchAgents(), fetchGlobalUsage(), fetchHealth(), fetchGatewayUptime(), fetchAgentNames(), fetchGpuVram()])
 
     const interval = setInterval(() => {
       if (!isPolling.value) return
@@ -578,10 +601,17 @@ export const useAgentStore = defineStore('agent', () => {
       fetchHealth()
     }, HEALTH_CHECK_INTERVAL)
 
+    // GPU VRAM 轮询 (REC-091) - 30秒
+    const gpuInterval = setInterval(() => {
+      if (!isPolling.value) return
+      fetchGpuVram()
+    }, GPU_POLL_INTERVAL)
+
     return () => {
       isPolling.value = false
       clearInterval(interval)
       clearInterval(healthInterval)
+      clearInterval(gpuInterval)
     }
   }
 
@@ -596,6 +626,9 @@ export const useAgentStore = defineStore('agent', () => {
     healthStatus,
     gatewayUptimeMs,
     gatewayVersion,
+    gpuVramPercentage,
+    gpuVramUsedMb,
+    gpuVramTotalMb,
     filterStatus,
     agentNameMap,
     isPolling,
@@ -624,6 +657,7 @@ export const useAgentStore = defineStore('agent', () => {
     fetchHealth,
     fetchGatewayUptime,
     fetchAgentNames,
+    fetchGpuVram,
     resetSession,
     fetchSessionHistory,
     subscribeAgents,

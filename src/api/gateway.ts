@@ -136,6 +136,34 @@ export async function health(): Promise<unknown> {
 }
 
 /**
+ * 获取 GPU 显存使用占比（REC-091 / REC-096）
+ * 开发环境：通过 Vite proxy (/api/gpu-vram → localhost:31004)
+ * 生产环境：直接调用后端地址
+ * 返回: { usedPct: number, usedMb: number, totalMb: number }
+ */
+export async function getGpuVramUsage(): Promise<{ usedPct: number; usedMb: number; totalMb: number } | null> {
+  try {
+    // 注意：不能用 gatewayApi（其 baseURL='/api' 会导致双重前缀）
+    // 开发环境走 Vite proxy，生产环境直连后端
+    const url = import.meta.env.DEV
+      ? '/api/gpu-vram'
+      : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31004'}/api/gpu-vram`
+    const resp = await axios.get(url, { timeout: 10000 })
+    const data = resp.data as { usedPct: number | null; usedMb?: number; totalMb?: number }
+    if (data?.usedPct != null) {
+      return {
+        usedPct: data.usedPct,
+        usedMb: data.usedMb || 0,
+        totalMb: data.totalMb || 0,
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
  * 结构化工具限制错误
  */
 export class ToolRestrictedError extends Error {

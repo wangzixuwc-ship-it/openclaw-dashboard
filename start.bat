@@ -32,21 +32,31 @@ if not exist "node_modules" (
     echo.
 )
 
+REM 检查后端依赖
+if not exist "backend\node_modules" (
+    echo [提示] 检测到后端依赖未安装，开始安装...
+    cd backend
+    call npm install
+    cd ..
+    echo [成功] 后端依赖安装完成
+    echo.
+)
+
 echo ========================================
-echo [1/2] 正在启动 Agent Service...
+echo [1/2] 正在启动 Dashboard Backend...
 echo ========================================
+
+cd backend
+start "Dashboard Backend" /min npm run start:dev
+cd ..
+timeout /t 3 /nobreak >nul
+echo [成功] Dashboard Backend 已启动（端口 31004）
 echo.
 
-REM 启动 Agent Service（后台运行）
-start "Agent Service" /min node scripts/agent-service.js
-timeout /t 2 /nobreak >nul
-echo [成功] Agent Service 已启动（端口 3001）
-echo.
-
 echo ========================================
-echo [2/2] 正在启动 Dashboard...
+echo [2/2] 正在启动 Dashboard 前端...
 echo ========================================
-echo [提示] 按 Ctrl+C 可停止 Dashboard
+echo [提示] 按 Ctrl+C 可停止前端
 echo.
 
 call npm run dev
