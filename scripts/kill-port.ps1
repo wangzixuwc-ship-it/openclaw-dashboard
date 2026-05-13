@@ -1,0 +1,1 @@
+Get-NetTCPConnection -LocalPort 31001,31002 -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -ne $null } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
