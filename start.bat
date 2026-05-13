@@ -16,8 +16,8 @@ if errorlevel 1 goto :error
 :skip_install
 REM Kill existing processes on ports 31001 and 31002
 echo [1/4] Checking and freeing ports...
-powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 31001 -ErrorAction SilentlyContinue | Stop-Process -Force"
-powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 31002 -ErrorAction SilentlyContinue | Stop-Process -Force"
+powershell -NoProfile -Command "foreach ($c in (Get-NetTCPConnection -LocalPort 31001 -ErrorAction SilentlyContinue)) { if ($c.OwningProcess -and $c.OwningProcess -gt 0) { Stop-Process -Id $c.OwningProcess -Force -EA SilentlyContinue } }"
+powershell -NoProfile -Command "foreach ($c in (Get-NetTCPConnection -LocalPort 31002 -ErrorAction SilentlyContinue)) { if ($c.OwningProcess -and $c.OwningProcess -gt 0) { Stop-Process -Id $c.OwningProcess -Force -EA SilentlyContinue } }"
 timeout /t 1 > nul
 
 REM Start unified service

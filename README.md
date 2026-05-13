@@ -10,22 +10,18 @@
 
 # 启动
 
-**方式一**：运行 `start.bat` 即可启动（推荐）
+**Windows**：运行 `start.bat` 或 `start.sh`
 
-**方式二**：命令行启动
-```bash
-# 启动统一服务（端口 31002）和前端（端口 31001）
-npm run start:all
-
-# 或分别启动
-node scripts/unified-service.js  # 统一服务
-npm run dev                      # 前端
-```
+**MacOS**：运行 `start.sh`
 
 # 配置
 在 `.env` 文件中配置 OpenClaw 系统的 API 地址、Token、电费单价、OpenClaw 版本、Agent 中文称呼等。
+
 请参考 [env.example](.env.example)。
+
 如果需要自定义 Agent 中文称呼，需要在 `.env` 文件中添加对应的变量名，格式为 `VITE_AGENT_<id>=<中文名称>`（id 中连字符用下划线替换）。
+
+> 如果 `.env` 不存在，则将 `.env.example` 重命名为 `.env` 即可
 
 # 注意
 Openclaw 的版本必须在 2026.3.28 以上。
