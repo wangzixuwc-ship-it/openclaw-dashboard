@@ -19,27 +19,15 @@ function getWsClientId(): string {
   }
 }
 
-// Build WebSocket URL (direct to gateway, no Vite proxy for WS).
+// Build WebSocket URL — always use /api proxy to avoid CORS
 function buildWsUrl(): string {
-  const rawWsUrl = import.meta.env.VITE_WS_URL
-  const rawGatewayUrl = import.meta.env.VITE_GATEWAY_URL
-
-  let baseUrl: string
-
-  if (rawWsUrl) {
-    baseUrl = rawWsUrl
-  } else if (rawGatewayUrl) {
-    baseUrl = rawGatewayUrl.replace(/^http(s?)?:/, 'ws$1:')
-  } else {
-    baseUrl = 'ws://127.0.0.1:18789'
-  }
-
   const token = getAuthToken()
+  const wsPath = '/api/ws'
   if (token) {
-    return `${baseUrl}/ws?token=${encodeURIComponent(token)}`
+    return `${wsPath}?token=${encodeURIComponent(token)}`
   }
   console.warn('[GatewayWS] No auth token — connecting without authentication')
-  return `${baseUrl}/ws`
+  return wsPath
 }
 
 export type WsMessage = Record<string, unknown>

@@ -1,10 +1,8 @@
 import axios from 'axios'
 import { getAuthToken } from '../config/auth'
 
-// Use /api proxy in dev mode (localhost/127.0.0.1) to avoid CORS; use direct URL otherwise
-const rawUrl = import.meta.env.VITE_GATEWAY_URL
-const isLocalTarget = rawUrl && (rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1'))
-const GATEWAY_BASE_URL = isLocalTarget ? '/api' : (rawUrl || 'http://127.0.0.1:18789')
+// Always use /api prefix — Vite proxy rewrites /api → gateway root
+const GATEWAY_BASE_URL = '/api'
 
 const gatewayApi = axios.create({
   baseURL: GATEWAY_BASE_URL,
