@@ -28,7 +28,6 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: frontendPort,
-      cors: true, // 允许跨域访问（远程连接支持）
       proxy: {
         '/api/gpu-vram': {
           // GPU VRAM 统一服务 (端口 31002)
