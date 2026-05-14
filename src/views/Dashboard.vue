@@ -10,6 +10,12 @@
         </div>
 
         <div class="status-indicators">
+          <!-- 视图切换 (REC-067) -->
+          <el-radio-group v-model="activeView" size="small" class="view-switcher">
+            <el-radio-button value="agent">Agent 看板</el-radio-button>
+            <el-radio-button value="project">项目监控</el-radio-button>
+          </el-radio-group>
+
           <!-- Gateway Version -->
           <div class="indicator indicator-version">
             <span class="indicator-label">OpenClaw</span>
@@ -73,7 +79,7 @@
     </section>
 
     <!-- ========= 3. 看板主体（5列：空闲/运行中/已终止/错误/未知） ========= -->
-    <main class="board-container">
+    <main class="board-container" v-if="activeView === 'agent'">
       <!-- 空闲列 -->
       <div class="board-column board-column-idle">
         <div class="board-column-header" style="border-bottom-color: #f59e0b;">
@@ -185,6 +191,9 @@
       </div>
     </main>
 
+    <!-- 项目监控视图 (REC-067) -->
+    <ProjectMonitor v-if="activeView === 'project'" />
+
     <!-- Agent Detail Drawer -->
     <AgentDetailDrawer
       v-model:visible="drawerVisible"
@@ -194,10 +203,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore, type AgentInfo } from '../stores/agent'
 import AgentCard from '../components/AgentCard.vue'
 import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
+import ProjectMonitor from './ProjectMonitor.vue'
 import {
   Monitor,
   Refresh,
@@ -211,6 +221,15 @@ import {
 } from '@element-plus/icons-vue'
 
 const store = useAgentStore()
+
+// 视图切换 (REC-067)
+const STORAGE_KEY = 'openclaw_dashboard_active_view'
+const activeView = ref<'agent' | 'project'>(
+  (localStorage.getItem(STORAGE_KEY) as 'agent' | 'project') ?? 'agent',
+)
+watch(activeView, (val) => {
+  localStorage.setItem(STORAGE_KEY, val)
+})
 
 // Real-time clock in status bar (updates every minute)
 const currentTime = ref('')
@@ -294,6 +313,7 @@ const statsCards = computed(() => [
 const healthDisplay = computed(() => {
   switch (store.healthStatus) {
     case 'healthy': return '正常'
+    case 'degraded': return '降级'
     case 'unhealthy': return '异常'
     case 'unknown': return '未知'
     default: return '检查中...'
@@ -302,13 +322,16 @@ const healthDisplay = computed(() => {
 const healthClass = computed(() => {
   switch (store.healthStatus) {
     case 'healthy': return 'health-healthy'
+    case 'degraded': return 'health-degraded'
     case 'unhealthy': return 'health-unhealthy'
     case 'unknown': return 'health-unknown'
     default: return 'health-unknown'
   }
 })
 const healthIcon = computed(() => {
-  return store.healthStatus === 'healthy' ? CircleCheck : Warning
+  if (store.healthStatus === 'healthy') return CircleCheck
+  if (store.healthStatus === 'degraded') return Warning
+  return Warning
 })
 
 // Actions
@@ -431,6 +454,7 @@ onUnmounted(() => {
 }
 
 .health-healthy { background: rgba(76, 175, 80, 0.15); color: #81c784; border-color: rgba(76,175,80,0.3) !important; }
+.health-degraded { background: rgba(255, 152, 0, 0.15); color: #ffb74d; border-color: rgba(255,152,0,0.3) !important; }
 .health-unhealthy { background: rgba(244, 67, 54, 0.15); color: #e57373; border-color: rgba(244,67,54,0.3) !important; }
 .health-unknown { background: rgba(255, 193, 7, 0.15); color: #ffd54f; border-color: rgba(255,193,7,0.3) !important; }
 
@@ -468,6 +492,34 @@ onUnmounted(() => {
 
 .refresh-btn {
   flex-shrink: 0;
+}
+
+/* ==================== VIEW SWITCHER (REC-067) ==================== */
+.view-switcher {
+  margin-right: 8px;
+}
+
+.view-switcher :deep(.el-radio-button__inner) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 4px 14px;
+}
+
+.view-switcher :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  background: rgba(66, 165, 245, 0.2);
+  border-color: #42a5f5;
+  color: #42a5f5;
+  box-shadow: none;
+}
+
+.view-switcher :deep(.el-radio-button:first-child .el-radio-button__inner) {
+  border-radius: 16px 0 0 16px;
+}
+
+.view-switcher :deep(.el-radio-button:last-child .el-radio-button__inner) {
+  border-radius: 0 16px 16px 0;
 }
 
 /* ==================== STATS SECTION ==================== */

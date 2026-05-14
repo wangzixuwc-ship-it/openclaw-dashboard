@@ -127,8 +127,8 @@
             class="chat-row"
             :class="msg.role === 'user' ? 'chat-row-user' : 'chat-row-assistant'"
           >
-            <div class="chat-bubble" :class="msg.role === 'user' ? 'bubble-user' : 'bubble-assistant'" :title="truncate(msg.content, 200)">
-              {{ truncate(msg.content, 200) }}
+            <div class="chat-bubble" :class="msg.role === 'user' ? 'bubble-user' : 'bubble-assistant'" :title="truncate(stripMarkdown(msg.content), 200)">
+              <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
             </div>
           </div>
         </div>
@@ -169,6 +169,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, type Component } from 'vue'
+import { marked } from 'marked'
+import { markedHighlight } from 'marked-highlight'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/atom-one-dark.css'
+import DOMPurify from 'dompurify'
 import type { AgentInfo } from '../stores/agent'
 import { useAgentStore } from '../stores/agent'
 import { ToolRestrictedError } from '../api/gateway'
@@ -352,22 +357,72 @@ function formatTime(dateStr: string): string {
 function cleanContent(raw: string): string {
   if (!raw) return ''
   let text = raw
-  // 1. 移除 thinking 标签及内容
-  text = text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
-  // 2. 移除 antThinking 标签及内容
-  text = text.replace(/<antThinking>[\s\S]*?<\/antThinking>/gi, '')
-  // 3. 移除 tool_call 标签及内容（XML 风格）
-  text = text.replace(/<tool_call[\s\S]*?<\/tool_call>/gi, '')
-  // 4. 移除 tool_call 标签及内容（XML processing instruction 风格）
-  text = text.replace(/<\?tool_call[\s\S]*?<\/tool_call>/gi, '')
-  // 5. 移除多余空白行
-  text = text.replace(/^\s*[\r\n]+/gm, '').trim()
+  // 1. 移除 thinking 标签及内容（兼容属性、可选空白）
+  text = text.replace(/<\s*thinking[^>]*>[\s\S]*?<\/\s*thinking\s*>/gi, '')
+  // 2. 移除 antThinking 标签及内容（兼容属性、可选空白）
+  text = text.replace(/<\s*antThinking[^>]*>[\s\S]*?<\/\s*antThinking\s*>/gi, '')
+  // 3. 移除 tool_call 标签及内容（XML 风格，兼容属性）
+  text = text.replace(/<\s*tool_call[^>]*>[\s\S]*?<\/\s*tool_call\s*>/gi, '')
+  // 4. 移除 tool_call 自闭合处理指令 <?tool_call ... ?>
+  text = text.replace(/<\?\s*tool_call[\s\S]*?\?>/gi, '')
+  // 5. 合并过多空行（保留一个空行作为段落分隔），防止相邻行意外形成表格
+  text = text.replace(/\n{3,}/g, '\n\n').trim()
   return text
 }
 
 function truncate(str: string, len: number): string {
   if (!str) return ''
   return str.length > len ? str.slice(0, len) + '...' : str
+}
+
+/** 去除常见 markdown 语法，提取纯文本（用于 tooltip） */
+function stripMarkdown(text: string): string {
+  if (!text) return ''
+  return text
+    .replace(/^#{1,6}\s+/gm, '')           // 标题标记
+    .replace(/(\*{1,3}|_{1,3})(.+?)\1/g, '$2') // 粗体/斜体
+    .replace(/`{1,3}(.+?)`{1,3}/g, '$1')   // 行内代码 / 代码块标记
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')  // 链接 [text](url) → text
+    .replace(/!\[([^\]]*)]\([^)]+\)/g, '$1') // 图片 ![alt](url) → alt
+    .replace(/^>\s+/gm, '')                // 引用标记
+    .replace(/[-*+]\s+/g, '')              // 无序列表标记
+    .replace(/^\d+\.\s+/gm, '')            // 有序列表标记
+    .replace(/\s{2,}/g, ' ')               // 合并空白
+    .trim()
+}
+
+// Configure marked with highlight.js for code syntax highlighting
+marked.use(
+  markedHighlight({
+    langPrefix: 'hljs language-',
+    highlight(code, lang) {
+      const language = hljs.getLanguage(lang) ? lang : 'plaintext'
+      return hljs.highlight(code, { language }).value
+    },
+  })
+)
+
+function renderMarkdown(content: string): string {
+  if (!content) return ''
+  try {
+    const raw = marked.parse(content, { async: false }) as string
+    return DOMPurify.sanitize(raw)
+  } catch {
+    // fallback: escape HTML 并作为纯文本显示
+    return escapeHtml(content)
+  }
+}
+
+/** 转义 HTML 特殊字符，防止 XSS */
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  }
+  return text.replace(/[&<>"']/g, (ch) => map[ch])
 }
 
 /**
@@ -707,7 +762,7 @@ watch(drawerVisible, (val) => {
   border-bottom-left-radius: 4px;
 }
 
-/* 移除旧的消息样式 */
+
 
 /* Text colors */
 .text-success { color: var(--el-color-success); }
@@ -765,5 +820,215 @@ watch(drawerVisible, (val) => {
   max-height: 200px;
   overflow-y: auto;
   color: var(--text-primary);
+}
+</style>
+
+<!-- 非 scoped：v-html 渲染的 markdown 内容不受 scoped 限制 -->
+<style>
+/* ── Markdown 内容样式（适配深色主题 & 两种气泡底色） ── */
+.markdown-body {
+  line-height: 1.65;
+  font-size: 13px;
+}
+
+/* ── 段落 ── */
+.markdown-body p {
+  margin: 0 0 8px;
+}
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── 标题 ── */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin: 10px 0 6px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+.markdown-body h1 { font-size: 17px; }
+.markdown-body h2 { font-size: 15.5px; }
+.markdown-body h3 { font-size: 14.5px; }
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 { font-size: 13.5px; }
+
+/* ── 列表（标记在内部，缩进一致）── */
+.markdown-body ul,
+.markdown-body ol {
+  margin: 6px 0;
+  padding-left: 0;
+  list-style-position: inside;
+}
+.markdown-body li {
+  margin: 3px 0;
+}
+.markdown-body li > p {
+  margin: 2px 0;
+  display: inline;
+}
+/* 嵌套列表缩进 */
+.markdown-body ul ul,
+.markdown-body ul ol,
+.markdown-body ol ul,
+.markdown-body ol ol {
+  padding-left: 20px;
+}
+
+/* ── 任务列表（[x] / [ ]）── */
+.markdown-body ul.contains-task-list {
+  padding-left: 6px;
+  list-style: none;
+}
+.markdown-body .task-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.markdown-body .task-list-item input[type="checkbox"] {
+  margin-top: 3px;
+  accent-color: var(--accent, #38bdf8);
+}
+
+/* ── 代码块（pre） ── */
+.markdown-body pre {
+  margin: 8px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: #1a1d2e !important;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.bubble-user .markdown-body pre {
+  background: rgba(0, 0, 0, 0.35) !important;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── inline code ── */
+.markdown-body code {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.bubble-user .markdown-body code {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* ── pre 内的 code 恢复无样式 ── */
+.markdown-body pre code {
+  padding: 0;
+  background: none !important;
+  border-radius: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* ── highlight.js 在气泡内微调 ── */
+.markdown-body .hljs {
+  background: transparent !important;
+  padding: 0;
+}
+
+/* ── 加粗 / 斜体 ── */
+.markdown-body strong {
+  font-weight: 700;
+}
+.markdown-body em {
+  font-style: italic;
+}
+
+/* ── 链接 ── */
+.markdown-body a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.88;
+  transition: opacity 0.15s;
+}
+.markdown-body a:hover {
+  opacity: 1;
+}
+.bubble-user .markdown-body a {
+  text-decoration-color: rgba(255, 255, 255, 0.5);
+}
+
+/* ── 引用 ── */
+.markdown-body blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--accent, #38bdf8);
+  opacity: 0.88;
+  border-radius: 0 4px 4px 0;
+  background: rgba(255, 255, 255, 0.04);
+}
+.bubble-user .markdown-body blockquote {
+  background: rgba(0, 0, 0, 0.1);
+  border-left-color: rgba(255, 255, 255, 0.5);
+}
+.markdown-body blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── 水平线 ── */
+.markdown-body hr {
+  margin: 10px 0;
+  border: none;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ── 表格（清晰边框）── */
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12.5px;
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+}
+.markdown-body th,
+.markdown-body td {
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  text-align: left;
+}
+.bubble-assistant .markdown-body th,
+.bubble-assistant .markdown-body td {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.bubble-user .markdown-body th,
+.bubble-user .markdown-body td {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.markdown-body th {
+  font-weight: 650;
+  background: rgba(255, 255, 255, 0.07);
+}
+.bubble-user .markdown-body th {
+  background: rgba(0, 0, 0, 0.15);
+}
+.markdown-body tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.03);
+}
+.bubble-user .markdown-body tr:nth-child(even) td {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* ── 图片 ── */
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 6px;
+  margin: 8px 0;
 }
 </style>

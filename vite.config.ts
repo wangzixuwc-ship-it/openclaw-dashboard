@@ -39,6 +39,11 @@ export default defineConfig(({ mode }) => {
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },
+        '/api/projects': {
+          // 项目监控 API (端口 31002, REC-067)
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
         '/api': {
           target: gatewayUrl,
           changeOrigin: true,

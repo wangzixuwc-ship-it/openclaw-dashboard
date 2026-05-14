@@ -208,12 +208,16 @@ async function isToolAvailable(toolName: string, cacheTtlMs = 60_000): Promise<b
     const status = e?.response?.status
     const errData = e?.response?.data
     const msg = String(errData?.error?.message ?? errData?.message ?? e?.message ?? '')
-    // 403 / "denied" / "not available" / "not allowed" → 不可用
+    // 403 / "denied" / "not available" / "not allowed" → 安全策略拒绝，缓存不可用
     const isRestricted =
       status === 403 ||
       /denied|forbidden|not\s+available|not\s+allowed|tool.*restrict|invoke.*reject/i.test(msg)
-    toolAvailabilityCache.set(toolName, { ok: !isRestricted, expireAt: now + cacheTtlMs })
-    return !isRestricted
+    if (isRestricted) {
+      // 安全策略拒绝：缓存"不可用"，正常 TTL
+      toolAvailabilityCache.set(toolName, { ok: false, expireAt: now + cacheTtlMs })
+    }
+    // 技术异常（网络超时、500、ECONNREFUSED）：不写缓存，下次重新探测
+    return false
   }
 }
 

@@ -58,7 +58,7 @@ export interface GlobalUsage {
 export const useAgentStore = defineStore('agent', () => {
   const agents = ref<AgentInfo[]>([])
   const globalUsage = ref<GlobalUsage>({ totalTokens: 0, totalCost: 0, updatedAt: '' })
-  const healthStatus = ref<string>('unknown')
+  const healthStatus = ref<'healthy' | 'degraded' | 'unhealthy' | 'unknown'>('unknown')
   const gatewayUptimeMs = ref<number>(0) // Gateway uptime from API
   const gatewayVersion = ref<string>(import.meta.env.VITE_OPENCLAW_VERSION || '') // Gateway version from /health, fallback from env (REC-089)
   const gpuVramPercentage = ref<number | null>(null) // GPU 显存使用占比 (REC-091)
@@ -426,7 +426,9 @@ export const useAgentStore = defineStore('agent', () => {
       // 映射 Gateway 的 status/ok 值到 UI 期望的值
       const raw = String(typed.status ?? '')
       const isOk = typed.ok === true || typed.ok === 'true'
-      if (isOk || raw === 'ok' || raw === 'live') {
+      if (raw === 'degraded') {
+        healthStatus.value = 'degraded'
+      } else if (isOk || raw === 'ok' || raw === 'live') {
         healthStatus.value = 'healthy'
       } else if (raw === 'error') {
         healthStatus.value = 'unhealthy'
