@@ -110,10 +110,14 @@ export async function sessionStatus(sessionKey: string): Promise<unknown> {
 }
 
 /**
- * Send message to session (发送消息到会话，用于重置等操作)
+ * Send message to session (发送消息到会话)
  * Uses: POST /tools/invoke with tool=sessions_send
  */
-export async function sessionsSend(sessionKey: string, message: string, timeoutSeconds: number = 0): Promise<unknown> {
+export async function sessionsSend(
+  sessionKey: string,
+  message: string,
+  timeoutSeconds: number = 0,
+): Promise<unknown> {
   return invokeTool('sessions_send', { sessionKey, message, timeoutSeconds })
 }
 

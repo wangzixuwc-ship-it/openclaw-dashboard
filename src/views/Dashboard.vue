@@ -11,10 +11,10 @@
 
         <div class="status-indicators">
           <!-- 视图切换 (REC-067) -->
-          <el-radio-group v-model="activeView" size="small" class="view-switcher">
+          <!-- <el-radio-group v-model="activeView" size="small" class="view-switcher">
             <el-radio-button value="agent">Agent 看板</el-radio-button>
             <el-radio-button value="project">项目监控</el-radio-button>
-          </el-radio-group>
+          </el-radio-group> -->
 
           <!-- Gateway Version -->
           <div class="indicator indicator-version">

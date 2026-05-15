@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { sessionsList, sessionStatus, health, sessionsHistory, agentsList, getGpuVramUsage } from '../api/gateway'
+import { sessionsList, sessionStatus, health, sessionsHistory, agentsList, getGpuVramUsage, sessionsSend } from '../api/gateway'
 import { getUsageStats } from '../api/usage-stats'
 
 // Constants
@@ -55,6 +55,11 @@ export interface GlobalUsage {
   updatedAt: string
   startTime?: string  // Gateway or service start time (for uptime calculation)
   uptimeMs?: number   // Service uptime in milliseconds
+}
+
+export interface ImageAttachment {
+  mediaType: string
+  data: string
 }
 
 export const useAgentStore = defineStore('agent', () => {
@@ -584,36 +589,63 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /**
-   * 发送消息到 Agent 会话（通过后端服务 CLI 命令，与重置会话相同方式）
-   * 使用：POST {backendUrl}/api/send
+   * 发送消息到 Agent 会话
+   * 使用 Gateway REST API /tools/invoke with tool=sessions_send
    */
   async function sendAgentMessage(sessionKey: string, message: string): Promise<void> {
     try {
-      const agentId = extractAgentId(sessionKey)
-      
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:31004'
-      const url = `${backendUrl}/api/send`
-      
-      console.log(`[AgentStore] Calling send service: ${url}`)
-      console.log(`[AgentStore] Agent ID: ${agentId}, message: ${message.slice(0, 100)}`)
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ agentId, message }),
-      })
-      
-      const result = await response.json()
-      
-      if (!response.ok) {
-        throw new Error(result.error || `HTTP ${response.status}`)
-      }
-      
-      console.log(`[AgentStore] Send message to ${sessionKey} via CLI command, result:`, result)
+      console.log(`[AgentStore] Sending to ${sessionKey}: ${message.slice(0, 100)}`)
+      const result = await sessionsSend(sessionKey, message, 0)
+      console.log(`[AgentStore] Send result:`, result)
     } catch (e: any) {
       console.error(`[AgentStore] sendAgentMessage(${sessionKey}) error:`, e)
+      throw e
+    }
+  }
+
+  /**
+   * 发送消息到 Agent 会话（支持图片附件）
+   * 方案 B：图片 base64 先写入 Agent workspace，再发送文件路径
+   */
+  async function sendAgentMessageWithImages(
+    sessionKey: string,
+    text: string,
+    images: ImageAttachment[],
+  ): Promise<void> {
+    try {
+      const agentId = extractAgentId(sessionKey)
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:31004'
+
+      // Step 1: 将所有图片写入 Agent workspace
+      const filePaths: string[] = []
+      for (const img of images) {
+        const uploadUrl = `${backendUrl}/api/upload-image`
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId, mediaType: img.mediaType, data: img.data }),
+        })
+        const result = await response.json()
+        if (result.success) {
+          filePaths.push(result.filePath)
+          console.log(`[AgentStore] Uploaded image: ${result.filePath}`)
+        } else {
+          throw new Error(`上传图片失败: ${result.error}`)
+        }
+      }
+
+      // Step 2: 构建消息 — 文本 + 文件路径
+      let fullMessage = text
+      for (const fp of filePaths) {
+        fullMessage += `\n\n${fp}`
+      }
+
+      // Step 3: 发送消息
+      console.log(`[AgentStore] Sending to ${sessionKey}: ${fullMessage.slice(0, 120)}`)
+      const result = await sessionsSend(sessionKey, fullMessage, 0)
+      console.log(`[AgentStore] Send result:`, result)
+    } catch (e: any) {
+      console.error(`[AgentStore] sendAgentMessageWithImages(${sessionKey}) error:`, e)
       throw e
     }
   }
@@ -911,6 +943,7 @@ export const useAgentStore = defineStore('agent', () => {
     fetchGpuVram,
     resetSession,
     sendAgentMessage,
+    sendAgentMessageWithImages,
     fetchSessionHistory,
     subscribeAgents,
     stopPolling,

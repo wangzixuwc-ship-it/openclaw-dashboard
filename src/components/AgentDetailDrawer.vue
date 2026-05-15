@@ -83,9 +83,9 @@
                   v-model="chatInput"
                   type="textarea"
                   :rows="2"
-                  placeholder="输入消息... (Enter 发送，支持粘贴图片)"
+                  placeholder="输入消息... (Enter 发送，Ctrl+Enter 换行，支持粘贴图片)"
                   :disabled="sending"
-                  @keydown.enter.prevent="sendMessage"
+                  @keydown="handleInputKeydown"
                 />
                 <el-button
                   type="primary"
@@ -713,26 +713,36 @@ function handlePaste(event: ClipboardEvent): void {
   }
 }
 
-/** 发送消息到当前会话（与重置会话相同方式：通过后端服务 CLI 命令） */
+/** 输入框按键处理：Enter 发送，Ctrl+Enter 换行 */
+function handleInputKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
+    e.preventDefault()
+    sendMessage()
+  }
+  // Ctrl+Enter / Shift+Enter → 默认行为（插入换行）
+}
+
+/** 发送消息到当前会话 */
 async function sendMessage(): Promise<void> {
   const text = chatInput.value.trim()
   if ((!text && imageAttachments.value.length === 0) || !agent.value?.key || sending.value) return
 
-  // 有图片时仅发送文本部分（CLI 暂不支持图片）
-  if (imageAttachments.value.length > 0 && !text) return
-  const messageText = text
-
   sending.value = true
   try {
-    await store.sendAgentMessage(agent.value.key, messageText)
+    // 方案B：有图片时先写入 Agent workspace，再发送文件路径
+    if (imageAttachments.value.length > 0) {
+      await store.sendAgentMessageWithImages(agent.value.key, text, imageAttachments.value)
+    } else {
+      await store.sendAgentMessage(agent.value.key, text)
+    }
 
     chatInput.value = ''
     imageAttachments.value = []
 
     ElMessage.success('消息已发送')
 
-    // 发送成功后刷新消息
-    await loadHistory()
+    // 发送成功后静默刷新消息列表（不显示 loading 遮罩）
+    await loadHistory(true)
   } catch (e: any) {
     console.error('[AgentDetailDrawer] sendMessage error:', e)
     const errorMsg = e?.message || String(e)
