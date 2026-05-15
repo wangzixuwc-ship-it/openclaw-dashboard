@@ -185,6 +185,17 @@ body {
   color: var(--text-primary) !important;
 }
 
+/* REC-077: Popover/Tooltip 箭头深色主题修复 */
+.el-popper__arrow,
+.el-tooltip__popper .el-popper__arrow {
+  background: none !important;
+}
+
+.el-popper__arrow::before {
+  background: linear-gradient(135deg, rgba(26, 26, 46, 0.95), rgba(18, 18, 36, 0.98)) !important;
+  border: 1px solid rgba(66, 165, 245, 0.35) !important;
+}
+
 /* Divider */
 .el-divider__text {
   color: var(--text-secondary) !important;

@@ -1,15 +1,12 @@
 /**
  * OpenClaw Usage Stats API
- * REC-097: 合并到 NestJS 后端（端口 31004）
- * 通过 Vite 代理 /gpu-vram → localhost:31004
+ * 通过 Vite 代理 /api/usage → 后端服务
  */
 
 import axios from 'axios'
 
-const USAGE_STATS_BASE_URL = '/gpu-vram'
-
 const usageStatsApi = axios.create({
-  baseURL: USAGE_STATS_BASE_URL,
+  baseURL: '',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',

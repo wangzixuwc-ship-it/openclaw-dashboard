@@ -71,13 +71,18 @@ export const useProjectStore = defineStore('project', () => {
   async function createNewProject(data: {
     name: string
     description?: string
-    subPath?: string
-    tags?: string[]
-    linkedAgents?: string[]
+    projectPath?: string
+    status?: string
   }): Promise<Project | null> {
     loading.value = true
     try {
-      const project = await createProject(data)
+      // 兼容旧接口：projectPath → rootPath
+      const payload = {
+        name: data.name,
+        description: data.description,
+        rootPath: data.projectPath || data.rootPath,
+      }
+      const project = await createProject(payload as any)
       projects.value.push(project)
       return project
     } catch (e) {
@@ -93,7 +98,8 @@ export const useProjectStore = defineStore('project', () => {
     data: {
       name?: string
       description?: string
-      subPath?: string
+      projectPath?: string
+      status?: string
       progress?: number
       manualOverride?: boolean
       tags?: string[]
@@ -101,7 +107,17 @@ export const useProjectStore = defineStore('project', () => {
     },
   ): Promise<Project | null> {
     try {
-      const updated = await updateProject(id, data)
+      const payload = {
+        name: data.name,
+        description: data.description,
+        rootPath: data.projectPath,
+        status: data.status,
+        progress: data.progress,
+        manualOverride: data.manualOverride,
+        tags: data.tags,
+        linkedAgents: data.linkedAgents,
+      }
+      const updated = await updateProject(id, payload as any)
       const idx = projects.value.findIndex((p) => p.id === id)
       if (idx >= 0) projects.value[idx] = updated
       return updated

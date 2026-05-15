@@ -7,6 +7,8 @@ import { getUsageStats } from '../api/usage-stats'
 const HEALTH_CHECK_INTERVAL = 10000 // 10s
 const AGENT_POLL_INTERVAL = 10000 // 10s
 const GPU_POLL_INTERVAL = 30000 // 30s (REC-091)
+const MESSAGE_POLL_INTERVAL = 3000 // 3s (REC-080)
+const BUBBLE_DURATION = 20000 // 20s 气泡自动消失
 const STORAGE_KEY = 'openclaw_dashboard_agent_filter'
 
 // Types
@@ -69,6 +71,18 @@ export const useAgentStore = defineStore('agent', () => {
   const filterStatus = ref<FilterStatus>('all')
   const isPolling = ref(false)
   const lastUpdateTime = ref(0)
+
+  // ============================================
+  // REC-071: Agent 消息气泡状态
+  // ============================================
+  interface MessageBubbleData {
+    content: string
+    timestamp: number
+  }
+  const messageBubbles = ref<Record<string, MessageBubbleData>>({})
+  const lastMessageCount = ref<Record<string, number>>({})
+  let bubbleTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+  let messagePollTimer: ReturnType<typeof setInterval> | null = null
 
   // ============================================
   // Agent 名称映射：API 为主，.env 配置化降级（REC-091）
@@ -528,17 +542,9 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function resetSession(sessionKey: string): Promise<void> {
     try {
-      // 从 sessionKey 中提取 agent id
-      // 格式：agent:<id>:<channel> 或 agent:<id>
-      let agentId = sessionKey
-      if (sessionKey.includes(':')) {
-        const parts = sessionKey.split(':')
-        if (parts[0] === 'agent' && parts.length >= 2) {
-          agentId = parts[1]
-        }
-      }
+      const agentId = extractAgentId(sessionKey)
       
-      // REC-097: 调用合并后的后端服务 (端口 31004)
+      // REC-097: 调用合并后的后端服务 (端口 31002/31004)
       const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:31004'
       const url = `${backendUrl}/reset`
       
@@ -566,6 +572,52 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  /** 从 sessionKey 提取 agentId（与 resetSession 共用） */
+  function extractAgentId(sessionKey: string): string {
+    if (sessionKey.includes(':')) {
+      const parts = sessionKey.split(':')
+      if (parts[0] === 'agent' && parts.length >= 2) {
+        return parts[1]
+      }
+    }
+    return sessionKey
+  }
+
+  /**
+   * 发送消息到 Agent 会话（通过后端服务 CLI 命令，与重置会话相同方式）
+   * 使用：POST {backendUrl}/api/send
+   */
+  async function sendAgentMessage(sessionKey: string, message: string): Promise<void> {
+    try {
+      const agentId = extractAgentId(sessionKey)
+      
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:31004'
+      const url = `${backendUrl}/api/send`
+      
+      console.log(`[AgentStore] Calling send service: ${url}`)
+      console.log(`[AgentStore] Agent ID: ${agentId}, message: ${message.slice(0, 100)}`)
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ agentId, message }),
+      })
+      
+      const result = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`)
+      }
+      
+      console.log(`[AgentStore] Send message to ${sessionKey} via CLI command, result:`, result)
+    } catch (e: any) {
+      console.error(`[AgentStore] sendAgentMessage(${sessionKey}) error:`, e)
+      throw e
+    }
+  }
+
   function getAgentByKey(key: string): AgentInfo | null {
     const agent = agents.value.find((a) => a.key === key)
     return agent || null
@@ -587,9 +639,192 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  // ============================================
+  // REC-071: Agent 消息气泡管理
+  // ============================================
+
+  /**
+   * 显示/更新 Agent 消息气泡
+   * 新消息覆盖旧气泡，重置 3 秒倒计时
+   */
+  function updateAgentBubble(agentKey: string, content: string): void {
+    // 清除旧定时器
+    if (bubbleTimers[agentKey]) {
+      clearTimeout(bubbleTimers[agentKey])
+    }
+
+    // 设置新气泡
+    messageBubbles.value[agentKey] = {
+      content,
+      timestamp: Date.now(),
+    }
+
+    // 3 秒后自动消失
+    bubbleTimers[agentKey] = setTimeout(() => {
+      delete messageBubbles.value[agentKey]
+      delete bubbleTimers[agentKey]
+    }, BUBBLE_DURATION)
+  }
+
+  /**
+   * 轮询检测 Agent 新消息（增量检测）
+   * REC-076: 只显示 running 状态 + 显示所有内容类型（含思考过程、工具调用）
+   */
+  async function checkNewMessages(): Promise<void> {
+    console.log('[REC-082] checkNewMessages 开始，agents 数量:', agents.value.length)
+
+    // 提取消息内容的通用函数
+    function extractContent(msg: Record<string, unknown>): string {
+      if (typeof msg?.content === 'string') return msg.content as string
+      if (typeof msg?.content === 'object' && msg.content !== null && !Array.isArray(msg.content)) {
+        const c = msg.content as Record<string, unknown>
+        if (typeof c.text === 'string') return c.text
+      }
+      if (Array.isArray(msg?.content)) {
+        const items = msg.content as Array<Record<string, unknown>>
+        console.log(`[REC-085] content 数组 (${items.length} 项):`, items.map((x: Record<string, unknown>) => ({
+          type: x.type,
+          name: x.name,
+          input: x.input ? JSON.stringify(x.input).slice(0, 80) : null,
+          textLen: typeof x.text === 'string' ? x.text.length : 0,
+          thinkingLen: typeof x.thinking === 'string' ? x.thinking.length : 0,
+          contentItems: Array.isArray(x.content) ? (x.content as any[]).length : null,
+        })))
+        const parts = items.map(item => {
+          if (!item || typeof item !== 'object') return ''
+          const t = String(item.type ?? '')
+          if (t === 'text') return (item.text as string) ?? ''
+          if (t === 'thinking') return `💭 ${(item.thinking as string) ?? ''}`
+          if (t === 'tool_use') {
+            const name = String(item.name ?? '')
+            if (name) return `[🔧 ${name}]`
+            // 没有 name 时尝试从 input 提取信息
+            const input = item.input
+            if (typeof input === 'string' && input) return `[🔧 工具调用]`
+            if (typeof input === 'object' && input !== null) return `[🔧 工具调用]`
+            return ''
+          }
+          if (t === 'tool_result') {
+            const name = String(item.name ?? '')
+            // tool_result 的 content 可能是数组 [{type:'text', text:'...'}]
+            const resultContent = item.content
+            if (Array.isArray(resultContent)) {
+              const textParts = resultContent
+                .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
+                .map((r: any) => r.text)
+              if (textParts.length > 0) {
+                return `[🔧 ${name || '结果'}] ${textParts.join('\n').slice(0, 200)}`
+              }
+            }
+            // 降级：直接取 text 字段
+            if (typeof item.text === 'string' && item.text) return `[🔧 ${name || '结果'}] ${item.text}`
+            if (name) return `[🔧 ${name}]`
+            return `[🔧 工具结果]`
+          }
+          return ''
+        }).filter(s => s && s !== '[tool_code]')
+        console.log(`[REC-085] 提取结果 (${parts.length} 部分):`, parts.map(p => p.slice(0, 80)))
+        return parts.join('\n')
+      }
+      return ''
+    }
+
+    // 过滤系统消息
+    function isSystemMessage(content: string): boolean {
+      return content.includes('巡检异常通知')
+        || content.includes('巡检提醒')
+        || content.includes('HEARTBEAT_OK')
+        || content.startsWith('收到巡检报告')
+        || content.includes('巡检异常汇报')
+    }
+
+    for (const agent of agents.value) {
+      if (agent.key.includes(':cron:')) continue
+      if (agent.status !== 'running') continue
+
+      try {
+        const history = await fetchSessionHistory(agent.key, 50)
+        const currentCount = history.length
+
+        const prevCount = lastMessageCount.value[agent.key] || 0
+        // 仅处理会话重置（消息数变少）：重新初始化计数器
+        if (prevCount > currentCount) {
+          lastMessageCount.value[agent.key] = currentCount
+          continue
+        }
+
+        if (currentCount > prevCount) {
+          // 找最新一条 assistant/agent 消息（而非 user 消息）
+          const newCount = currentCount - prevCount
+          const newMessages = history.slice(-Math.min(newCount, 20)).reverse()
+
+          let found = false
+          for (const raw of newMessages) {
+            const msg = (raw && typeof raw === 'object'
+              ? ((raw.message && typeof raw.message === 'object' ? raw.message : raw) as Record<string, unknown>)
+              : {}) as Record<string, unknown>
+
+            const role = String(msg?.role ?? '')
+            console.log(`[REC-085] agent=${agent.key} role="${role}" content 类型=${typeof msg.content}`, typeof msg.content === 'object' ? JSON.stringify(msg.content).slice(0, 200) : String(msg.content ?? '').slice(0, 100))
+
+            // 显示所有角色的消息（包含 user、assistant、tool 等）
+            // 避免遗漏，全量显示；extractContent 内部会过滤无意义内容
+            if (role === 'user' || role === 'assistant' || role === 'agent' || role === 'tool') {
+              const content = extractContent(msg)
+              console.log(`[REC-085] 提取内容 长度=${content?.length ?? 0}`, content?.slice(0, 120))
+              if (content && !isSystemMessage(content)) {
+                console.log(`[REC-085] ✅ agent=${agent.key} 显示:`, content.slice(0, 150))
+                updateAgentBubble(agent.key, content)
+                found = true
+                break // 只显示最新一条
+              }
+            }
+          }
+
+          if (!found) {
+            console.log(`[REC-082] agent=${agent.key} 无符合条件的消息（新消息 ${newCount} 条）`)
+          }
+
+          lastMessageCount.value[agent.key] = currentCount
+        }
+      } catch (e) {
+        console.warn(`[REC-082] agent=${agent.key} 轮询失败:`, e)
+      }
+    }
+  }
+
+  /**
+   * 获取指定 Agent 的当前气泡消息
+   */
+  function getAgentBubble(agentKey: string): string | null {
+    return messageBubbles.value[agentKey]?.content ?? null
+  }
+
+  /**
+   * 清除指定 Agent 的气泡
+   */
+  function clearAgentBubble(agentKey: string): void {
+    if (bubbleTimers[agentKey]) {
+      clearTimeout(bubbleTimers[agentKey])
+      delete bubbleTimers[agentKey]
+    }
+    delete messageBubbles.value[agentKey]
+  }
+
   async function subscribeAgents(): Promise<() => void> {
     isPolling.value = true
     await Promise.all([fetchAgents(), fetchGlobalUsage(), fetchHealth(), fetchGatewayUptime(), fetchAgentNames(), fetchGpuVram()])
+
+    // REC-071: 首次加载时静默初始化消息计数器
+    for (const agent of agents.value) {
+      if (agent.key.includes(':cron:')) continue
+      if (lastMessageCount.value[agent.key] !== undefined) continue
+      try {
+        const h = await fetchSessionHistory(agent.key, 1)
+        lastMessageCount.value[agent.key] = h.length
+      } catch { /* ignore */ }
+    }
+    console.log('[REC-071] 初始化计数器:', lastMessageCount.value)
 
     const interval = setInterval(() => {
       if (!isPolling.value) return
@@ -609,11 +844,24 @@ export const useAgentStore = defineStore('agent', () => {
       fetchGpuVram()
     }, GPU_POLL_INTERVAL)
 
+    // REC-071: 消息气泡轮询
+    messagePollTimer = setInterval(() => {
+      if (!isPolling.value) return
+      checkNewMessages()
+    }, MESSAGE_POLL_INTERVAL)
+
     return () => {
       isPolling.value = false
       clearInterval(interval)
       clearInterval(healthInterval)
       clearInterval(gpuInterval)
+      if (messagePollTimer) {
+        clearInterval(messagePollTimer)
+        messagePollTimer = null
+      }
+      // 清理所有气泡定时器
+      Object.values(bubbleTimers).forEach(clearTimeout)
+      bubbleTimers = {}
     }
   }
 
@@ -633,6 +881,7 @@ export const useAgentStore = defineStore('agent', () => {
     gpuVramTotalMb,
     filterStatus,
     agentNameMap,
+    messageBubbles,
     isPolling,
     lastUpdateTime,
     // Computed
@@ -661,8 +910,13 @@ export const useAgentStore = defineStore('agent', () => {
     fetchAgentNames,
     fetchGpuVram,
     resetSession,
+    sendAgentMessage,
     fetchSessionHistory,
     subscribeAgents,
     stopPolling,
+    // REC-071: 消息气泡
+    updateAgentBubble,
+    getAgentBubble,
+    clearAgentBubble,
   }
 })

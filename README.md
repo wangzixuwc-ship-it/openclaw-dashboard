@@ -6,7 +6,7 @@
 
 # 系统界面
 
-![alt text](Snipaste_2026-05-08_19-47-30.jpg)
+![alt text](image.png)
 
 # 启动
 
@@ -25,3 +25,64 @@
 
 # 注意
 Openclaw 的版本必须在 2026.3.28 以上。
+
+# 安装指南
+## 下载并安装NodeJS
+[点击此处下载NodeJS](https://nodejs.org/dist/v24.15.0/node-v24.15.0-x64.msi)
+
+下载完成后按双击安装，一直点击下一步即可
+
+## 安装OpenClaw
+在终端执行 `npm i -g openclaw`
+
+# llama.cpp 配置文件
+```
+@echo off
+chcp 65001 >nul
+echo ========================================
+echo   Qwen3.6-27B GPU Server (RTX 5090 优化版)
+echo   显存：~28/32 GB (88%)
+echo   上下文：512K/agent (超大上下文)
+echo   并发：1 slot (单任务模式)
+echo   线程：24 (性能优化)
+echo ========================================
+echo.
+
+set LLAMA_PATH=d:\llama\llama-b8863-bin-win-cuda-12.4-x64
+set MODEL_PATH=d:\llama\model
+set MODEL_NAME=Qwen3.6-27B-UD-Q4_K_XL
+set PATH=%LLAMA_PATH%;%PATH%
+set CUDA_VISIBLE_DEVICES=0
+set LLAMA_BACKENDS=CUDA
+set GGML_CUDA_ENABLE=1
+
+"%LLAMA_PATH%\llama-server.exe" ^
+ --model "%MODEL_PATH%\%MODEL_NAME%\%MODEL_NAME%.gguf" ^
+ --mmproj "%MODEL_PATH%\%MODEL_NAME%\mmproj-BF16.gguf" ^
+ --host 0.0.0.0 ^
+ --port 8080 ^
+ --n-gpu-layers 999 ^
+ --ctx-size 524288 ^
+ --batch-size 512 ^
+ --ubatch-size 256 ^
+ --threads 24 ^
+ --flash-attn on ^
+ --cache-type-k q4_0 ^
+ --cache-type-v q4_0 ^
+ --no-mmap ^
+ --slot-save-path "slots" ^
+ --reasoning-format deepseek ^
+ --sleep-idle-seconds -1 ^
+ -np 1 ^
+ -cb ^
+ --no-context-shift ^
+ --parallel 1 ^
+ --timeout 180 ^
+ --log-file server.log ^
+ -v
+
+pause
+```
+
+# 联系作者
+![alt text](wechat.jpg)

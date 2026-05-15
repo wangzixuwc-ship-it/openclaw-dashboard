@@ -1,9 +1,33 @@
 <template>
   <el-form ref="formRef" :model="form" :rules="rules" label-width="80px" label-position="top">
+    <!-- 项目目录（必填） -->
+    <el-form-item label="项目目录" prop="projectPath">
+      <div class="directory-picker">
+        <el-input v-model="form.projectPath" placeholder="选择或输入项目目录路径" @input="onPathChange">
+          <template #prefix>
+            <el-icon><Folder /></el-icon>
+          </template>
+        </el-input>
+        <el-button @click="pickDirectory">选择目录</el-button>
+      </div>
+    </el-form-item>
+
+    <!-- 项目名称（必填，默认从目录提取） -->
     <el-form-item label="项目名称" prop="name">
       <el-input v-model="form.name" placeholder="输入项目名称" maxlength="64" show-word-limit />
     </el-form-item>
 
+    <!-- 项目状态（必填） -->
+    <el-form-item label="项目状态" prop="status">
+      <el-radio-group v-model="form.status">
+        <el-radio-button value="pending">待启动</el-radio-button>
+        <el-radio-button value="active">进行中</el-radio-button>
+        <el-radio-button value="paused">已暂停</el-radio-button>
+        <el-radio-button value="completed">已完成</el-radio-button>
+      </el-radio-group>
+    </el-form-item>
+
+    <!-- 项目描述（可选） -->
     <el-form-item label="描述">
       <el-input
         v-model="form.description"
@@ -14,35 +38,7 @@
       />
     </el-form-item>
 
-    <el-form-item label="根目录">
-      <div class="directory-picker">
-        <el-input v-model="form.rootPath" placeholder="项目主根目录，如 D:\AI（可选）">
-          <template #prefix>
-            <el-icon><Folder /></el-icon>
-          </template>
-        </el-input>
-        <el-button @click="openDirectoryPicker">选择目录</el-button>
-      </div>
-    </el-form-item>
-
-    <el-form-item label="子路径">
-      <el-input v-model="form.subPath" placeholder="子路径（可选，相对根目录的相对路径）" />
-    </el-form-item>
-
-    <el-form-item label="标签">
-      <el-select v-model="form.tags" multiple filterable allow-create default-first-option placeholder="输入标签" style="width: 100%">
-        <el-option v-for="tag in defaultTags" :key="tag" :label="tag" :value="tag" />
-      </el-select>
-    </el-form-item>
-
-    <el-form-item label="进度" v-if="isEdit">
-      <div class="progress-editor">
-        <el-slider v-model="form.progress" :min="0" :max="100" :step="5" />
-        <el-input-number v-model="form.progress" :min="0" :max="100" :step="5" size="small" controls-position="right" />
-        <el-checkbox v-model="form.manualOverride">手动覆盖</el-checkbox>
-      </div>
-    </el-form-item>
-
+    <!-- 提交按钮 -->
     <el-form-item>
       <div class="form-actions">
         <el-button type="primary" @click="handleSubmit" :loading="submitting">
@@ -52,10 +48,34 @@
       </div>
     </el-form-item>
   </el-form>
+
+  <!-- 目录选择弹窗 -->
+  <el-dialog
+    v-model="showPicker"
+    title="选择项目目录"
+    width="480px"
+    :close-on-click-modal="false"
+    class="picker-dialog"
+  >
+    <el-input
+      v-model="pickerPath"
+      placeholder="输入或粘贴项目目录路径"
+      clearable
+      @keyup.enter="confirmPick"
+    >
+      <template #prefix>
+        <el-icon><Folder /></el-icon>
+      </template>
+    </el-input>
+    <template #footer>
+      <el-button @click="showPicker = false">取消</el-button>
+      <el-button type="primary" @click="confirmPick">确定</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { Folder } from '@element-plus/icons-vue'
 import type { Project } from '../types'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -65,36 +85,64 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  submit: [data: { name: string; description?: string; rootPath?: string; subPath?: string; tags?: string[]; progress?: number; manualOverride?: boolean }]
+  submit: [data: { name: string; description?: string; projectPath?: string; status?: string }]
   cancel: []
 }>()
 
 const isEdit = computed(() => !!props.project)
 
-const defaultTags = ['frontend', 'backend', 'devops', 'monitoring', 'AI', 'infra']
-
 const form = reactive({
+  projectPath: props.project?.rootPath ?? '',
   name: props.project?.name ?? '',
+  status: props.project?.status ?? 'pending',
   description: props.project?.description ?? '',
-  rootPath: props.project?.rootPath ?? '',
-  subPath: props.project?.subPath ?? '',
-  tags: props.project?.tags ?? [] as string[],
-  progress: props.project?.progress ?? 0,
-  manualOverride: props.project?.manualOverride ?? false,
 })
 
 const rules: FormRules = {
+  projectPath: [{ required: true, message: '请选择项目目录', trigger: 'blur' }],
   name: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
+  status: [{ required: true, message: '请选择项目状态', trigger: 'change' }],
 }
 
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
+const showPicker = ref(false)
+const pickerPath = ref('')
 
-function openDirectoryPicker() {
-  const path = prompt('请输入根目录路径：', form.rootPath)
-  if (path !== null) {
-    form.rootPath = path.trim()
+// 从目录路径提取名称，自动填充项目名称
+function onPathChange(val: string) {
+  if (val && !form.name) {
+    const basename = val.split(/[\\/]/).pop()
+    if (basename) {
+      form.name = basename
+    }
   }
+}
+
+// 初始化：如果有目录但没有名称，自动填充
+watch(
+  () => props.project,
+  (p) => {
+    if (p?.rootPath && !p.name) {
+      const basename = p.rootPath.split(/[\\/]/).pop()
+      if (basename) form.name = basename
+    }
+  },
+  { immediate: true }
+)
+
+function pickDirectory() {
+  pickerPath.value = form.projectPath
+  showPicker.value = true
+}
+
+function confirmPick() {
+  const path = pickerPath.value.trim()
+  if (path) {
+    form.projectPath = path
+    onPathChange(path)
+  }
+  showPicker.value = false
 }
 
 async function handleSubmit() {
@@ -103,20 +151,12 @@ async function handleSubmit() {
 
   submitting.value = true
   try {
-    const data = {
+    emit('submit', {
       name: form.name,
       description: form.description || undefined,
-      rootPath: form.rootPath || undefined,
-      subPath: form.subPath || undefined,
-      tags: form.tags.length ? form.tags : undefined,
-    }
-
-    if (isEdit.value) {
-      ;(data as Record<string, unknown>).progress = form.progress
-      ;(data as Record<string, unknown>).manualOverride = form.manualOverride
-    }
-
-    emit('submit', data)
+      projectPath: form.projectPath || undefined,
+      status: form.status,
+    })
   } finally {
     submitting.value = false
   }
@@ -134,19 +174,38 @@ async function handleSubmit() {
   flex: 1;
 }
 
-.progress-editor {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.progress-editor .el-slider {
-  flex: 1;
-}
-
 .form-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* 目录选择弹窗深色磨砂玻璃样式 */
+:deep(.picker-dialog.el-dialog) {
+  background: rgba(30, 30, 45, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+:deep(.picker-dialog .el-dialog__header) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-right: 0;
+}
+
+:deep(.picker-dialog .el-dialog__title) {
+  color: #e0e0e0;
+}
+
+:deep(.picker-dialog .el-dialog__body) {
+  padding-top: 16px;
+}
+
+:deep(.picker-dialog .el-dialog__footer) {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+:deep(.picker-dialog .el-overlay-dialog) {
+  background: rgba(0, 0, 0, 0.5);
 }
 </style>

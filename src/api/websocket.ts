@@ -1,24 +1,5 @@
 import { getAuthToken } from '../config/auth'
 
-/**
- * 获取 WebSocket 客户端唯一 ID
- * 首次连接时生成，localStorage 持久化（刷新后保持一致）
- */
-function getWsClientId(): string {
-  const STORAGE_KEY = 'ws-client-id'
-  try {
-    let id = localStorage.getItem(STORAGE_KEY)
-    if (!id) {
-      id = `ws-${crypto.randomUUID()}`
-      localStorage.setItem(STORAGE_KEY, id)
-    }
-    return id
-  } catch {
-    // localStorage not available (SSR or incognito), fall back to random
-    return `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  }
-}
-
 // Build WebSocket URL — always use /api proxy to avoid CORS
 function buildWsUrl(): string {
   const token = getAuthToken()
@@ -165,8 +146,7 @@ class GatewayWebSocket {
           const payload = data.payload as Record<string, unknown>
           const nonce = (payload?.nonce as string) || ''
 
-          // For browser-based Control UI, generate unique client ID
-          // This is a trusted local client that can omit device identity when authenticating with shared token
+          // Trusted same-process backend client — client.id 必须为 "gateway-client"
           // See: https://docs.openclaw.ai/gateway/protocol (Trusted same-process backend clients section)
           const connectReq = {
             type: 'req',
@@ -176,10 +156,10 @@ class GatewayWebSocket {
               minProtocol: 3,
               maxProtocol: 3,
               client: {
-                id: getWsClientId(),  // 唯一客户端 ID（crypto.randomUUID + localStorage 持久化）
+                id: 'gateway-client',  // mode=backend 时必须为常量 "gateway-client"
                 version: '1.0.0',
                 platform: 'web',
-                mode: 'backend',  // Backend mode for gateway-client
+                mode: 'backend',  // Backend mode — 可省略 device auth
               },
               role: 'operator',
               scopes: ['operator.read', 'operator.write', 'operator.admin'],

@@ -38,17 +38,17 @@ export interface Project {
 export interface ProjectCreatePayload {
   name: string
   description?: string
-  rootPath?: string            // 主项目根目录（绝对路径）
-  subPath?: string             // 子路径（相对路径）
-  tags?: string[]
-  linkedAgents?: string[]
+  projectPath?: string         // 项目目录（绝对路径，替代 rootPath + subPath）
+  status?: ProjectStatus       // 初始状态
+  rootPath?: string            // 兼容旧接口（从 projectPath 映射）
 }
 
 export interface ProjectUpdatePayload {
   name?: string
   description?: string
-  rootPath?: string            // 主项目根目录（绝对路径）
-  subPath?: string             // 子路径（相对路径）
+  projectPath?: string         // 项目目录（绝对路径）
+  status?: ProjectStatus       // 项目状态
+  rootPath?: string            // 兼容旧接口
   progress?: number
   manualOverride?: boolean
   tags?: string[]

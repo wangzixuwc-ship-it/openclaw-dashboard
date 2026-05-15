@@ -34,6 +34,7 @@
             v-if="store.gpuVramPercentage !== null && store.gpuVramPercentage !== undefined"
             :content="`${store.gpuVramUsedMb} / ${store.gpuVramTotalMb} MB`"
             placement="bottom"
+            class="gpu-tooltip"
           >
             <div class="indicator indicator-gpu">
               <el-icon :size="14"><Monitor /></el-icon>
@@ -96,6 +97,7 @@
             v-for="agent in store.idleAgents"
             :key="agent.key"
             :agent="agent"
+            :latest-message="store.getAgentBubble(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.idleAgents.length === 0 && !store.loading" description="暂无空闲的 Agent" :image-size="50" />
@@ -118,6 +120,7 @@
             v-for="agent in store.runningAgents"
             :key="agent.key"
             :agent="agent"
+            :latest-message="store.getAgentBubble(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.runningAgents.length === 0" description="暂无运行中的 Agent" :image-size="50" />
@@ -140,6 +143,7 @@
             v-for="agent in store.abortedAgents"
             :key="agent.key"
             :agent="agent"
+            :latest-message="store.getAgentBubble(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.abortedAgents.length === 0" description="暂无已终止的 Agent" :image-size="50" />
@@ -162,6 +166,7 @@
             v-for="agent in store.errorAgents"
             :key="agent.key"
             :agent="agent"
+            :latest-message="store.getAgentBubble(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.errorAgents.length === 0" description="暂无错误的 Agent" :image-size="50" />
@@ -184,6 +189,7 @@
             v-for="agent in store.unknownAgents"
             :key="agent.key"
             :agent="agent"
+            :latest-message="store.getAgentBubble(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.unknownAgents.length === 0" description="暂无未知状态的 Agent" :image-size="50" />

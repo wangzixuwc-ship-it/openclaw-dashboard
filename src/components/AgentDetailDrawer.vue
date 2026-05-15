@@ -2,10 +2,11 @@
   <el-drawer
     v-model="drawerVisible"
     :title="`Agent 详情：${displayAgentName}`"
-    size="520px"
+    size="1040px"
     direction="rtl"
     :close-on-click-modal="true"
     destroy-on-close
+    :z-index="3000"
   >
     <template #header>
       <div class="drawer-title">
@@ -23,152 +24,205 @@
       </div>
     </template>
 
-    <!-- Loading state -->
-    <div v-if="loadingHistory" class="loading-section">
-      <el-icon class="is-loading"><Loading /></el-icon>
-      <span>正在加载会话历史...</span>
-    </div>
-
     <template v-if="agent">
-      <!-- Session Info -->
-      <el-card class="detail-section" shadow="never">
-        <template #header>
-          <div class="section-header">
-            <el-icon><InfoFilled /></el-icon>
-            会话信息
-          </div>
-        </template>
+      <div class="drawer-body">
+        <!-- ========= 左侧：消息区域 ========= -->
+        <div class="drawer-left">
+          <div ref="msgContainerRef" class="left-scroll-wrap">
+            <el-card class="detail-section msg-section" shadow="never">
+              <template #header>
+                <div class="section-header">
+                  <el-icon><ChatDotRound /></el-icon>
+                  消息
+                  <span class="msg-count" v-if="recentMessages.length > 0">
+                    （{{ recentMessages.length }} 条）
+                  </span>
+                </div>
+              </template>
 
-        <div class="info-grid">
-          <div class="info-item">
-            <span class="info-label">当前任务</span>
-            <span class="info-value monospace" :title="agent.label || agent.key">{{ agent.label || agent.key }}</span>
-          </div>
-          <div class="info-item" v-if="agent.model">
-            <span class="info-label">模型</span>
-            <span class="info-value">{{ agent.model }}</span>
-          </div>
-          <div class="info-item" v-if="agent.createdAt">
-            <span class="info-label">创建时间</span>
-            <span class="info-value">{{ formatTime(agent.createdAt) }}</span>
-          </div>
-          <div class="info-item" v-if="agent.lastActivity">
-            <span class="info-label">最后活跃</span>
-            <span class="info-value">{{ formatTime(agent.lastActivity) }}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">运行时长</span>
-            <span class="info-value">{{ formattedDuration }}</span>
-          </div>
-        </div>
-      </el-card>
+              <el-empty v-if="recentMessages.length === 0" class="msg-card-inner empty-area" description="暂无消息" :image-size="60" />
 
-      <!-- Token / 上下文使用 -->
-      <el-card class="detail-section" shadow="never" v-if="agent.tokenUsage">
-        <template #header>
-          <div class="section-header">
-            <el-icon><Coin /></el-icon>
-            上下文使用
-          </div>
-        </template>
-
-        <div class="token-usage-panel">
-          <div class="token-stat-row">
-            <div class="token-stat">
-              <div class="stat-value">{{ agent.tokenUsage.current.toLocaleString() }}</div>
-              <div class="stat-label">Used Tokens</div>
-            </div>
-            <div class="token-stat">
-              <div class="stat-value">{{ agent.tokenUsage.max.toLocaleString() }}</div>
-              <div class="stat-label">上下文上限</div>
-            </div>
-            <div class="token-stat">
-              <div class="stat-value" :class="percentageClass">
-                {{ agent.tokenUsage.percentage }}%
+              <div v-else class="msg-card-inner">
+                <div class="messages-list-outer" @click="handleMsgImageClick">
+                  <div
+                    v-for="(msg, idx) in recentMessages"
+                    :key="idx"
+                    class="chat-row"
+                    :class="msg.role === 'user' ? 'chat-row-user' : 'chat-row-assistant'"
+                  >
+                    <div
+                      class="chat-bubble"
+                      :class="bubbleClass(msg)"
+                    >
+                      <div class="bubble-label" v-if="msg.contentType === 'thinking'">💭 思考</div>
+                      <div class="bubble-label" v-else-if="msg.contentType === 'tool_use'">🔧 工具调用</div>
+                      <div class="bubble-label" v-else-if="msg.contentType === 'tool_result'">🔧 工具结果</div>
+                      <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div class="stat-label">使用率</div>
+            </el-card>
+
+            <!-- 发送区域 -->
+            <div class="chat-send-area" @paste="handlePaste">
+              <!-- 粘贴的图片预览 -->
+              <div v-if="imageAttachments.length > 0" class="image-preview-strip">
+                <div v-for="(img, idx) in imageAttachments" :key="idx" class="image-preview-item">
+                  <img :src="img.url" class="image-preview-thumb" @click="previewImageUrl = img.url" />
+                  <el-button
+                    class="image-remove-btn"
+                    size="small"
+                    circle
+                    @click="imageAttachments.splice(idx, 1)"
+                  >×</el-button>
+                </div>
+              </div>
+              <div class="send-row">
+                <el-input
+                  v-model="chatInput"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="输入消息... (Enter 发送，支持粘贴图片)"
+                  :disabled="sending"
+                  @keydown.enter.prevent="sendMessage"
+                />
+                <el-button
+                  type="primary"
+                  :icon="Promotion"
+                  :loading="sending"
+                  @click="sendMessage"
+                >
+                  发送
+                </el-button>
+              </div>
             </div>
           </div>
 
-          <el-progress
-            :percentage="agent.tokenUsage.percentage"
-            :status="tokenProgressStatus"
-            :stroke-width="12"
-            :show-text="false"
-            class="token-progress"
-          />
-        </div>
-      </el-card>
-
-      <!-- 消息预览 -->
-      <el-card class="detail-section" shadow="never">
-        <template #header>
-          <div class="section-header">
-            <el-icon><ChatDotRound /></el-icon>
-            消息
-            <span class="msg-count" v-if="recentMessages.length > 0">
-              （{{ recentMessages.length }} 条）
-            </span>
+          <!-- 手动加载历史时左侧消息区域的 loading 遮罩 -->
+          <div v-if="loadingHistory" class="left-loading-overlay">
+            <el-icon class="is-loading" :size="28"><Loading /></el-icon>
+            <span>正在加载会话历史...</span>
           </div>
-        </template>
-
-        <div v-if="loadingHistory" class="empty-state">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          <span>正在加载消息...</span>
         </div>
 
-        <el-empty v-else-if="recentMessages.length === 0" description="暂无消息" :image-size="60" />
+        <!-- ========= 右侧：会话信息 + 上下文使用 + 操作 ========= -->
+        <div class="drawer-right">
+          <!-- Session Info -->
+          <el-card class="detail-section" shadow="never">
+            <template #header>
+              <div class="section-header">
+                <el-icon><InfoFilled /></el-icon>
+                会话信息
+              </div>
+            </template>
 
-        <div v-else class="messages-list">
-          <!-- 用户消息：右对齐蓝色气泡 -->
-          <div
-            v-for="(msg, idx) in recentMessages"
-            :key="idx"
-            class="chat-row"
-            :class="msg.role === 'user' ? 'chat-row-user' : 'chat-row-assistant'"
-          >
-            <div class="chat-bubble" :class="msg.role === 'user' ? 'bubble-user' : 'bubble-assistant'" :title="truncate(stripMarkdown(msg.content), 200)">
-              <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="info-label">当前任务</span>
+                <span class="info-value monospace" :title="agent.label || agent.key">{{ agent.label || agent.key }}</span>
+              </div>
+              <div class="info-item" v-if="agent.model">
+                <span class="info-label">模型</span>
+                <span class="info-value">{{ agent.model }}</span>
+              </div>
+              <div class="info-item" v-if="agent.createdAt">
+                <span class="info-label">创建时间</span>
+                <span class="info-value">{{ formatTime(agent.createdAt) }}</span>
+              </div>
+              <div class="info-item" v-if="agent.lastActivity">
+                <span class="info-label">最后活跃</span>
+                <span class="info-value">{{ formatTime(agent.lastActivity) }}</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">运行时长</span>
+                <span class="info-value">{{ formattedDuration }}</span>
+              </div>
             </div>
+          </el-card>
+
+          <!-- Token / 上下文使用 -->
+          <el-card class="detail-section" shadow="never" v-if="agent.tokenUsage">
+            <template #header>
+              <div class="section-header">
+                <el-icon><Coin /></el-icon>
+                上下文使用
+              </div>
+            </template>
+
+            <div class="token-usage-panel">
+              <div class="token-stat-row">
+                <div class="token-stat">
+                  <div class="stat-value">{{ agent.tokenUsage.current.toLocaleString() }}</div>
+                  <div class="stat-label">Used Tokens</div>
+                </div>
+                <div class="token-stat">
+                  <div class="stat-value">{{ agent.tokenUsage.max.toLocaleString() }}</div>
+                  <div class="stat-label">上下文上限</div>
+                </div>
+                <div class="token-stat">
+                  <div class="stat-value" :class="percentageClass">
+                    {{ agent.tokenUsage.percentage }}%
+                  </div>
+                  <div class="stat-label">使用率</div>
+                </div>
+              </div>
+
+              <el-progress
+                :percentage="agent.tokenUsage.percentage"
+                :status="tokenProgressStatus"
+                :stroke-width="12"
+                :show-text="false"
+                class="token-progress"
+              />
+            </div>
+          </el-card>
+
+          <!-- Extra Details -->
+          <el-card class="detail-section" shadow="never" v-if="agent.details">
+            <template #header>
+              <div class="section-header">
+                <el-icon><Document /></el-icon>
+                原始详情
+              </div>
+            </template>
+            <pre class="raw-details">{{ JSON.stringify(agent.details, null, 2) }}</pre>
+          </el-card>
+
+          <!-- Action Buttons -->
+          <div class="action-bar">
+            <el-button
+              type="danger"
+              :icon="Refresh"
+              @click="handleResetSession"
+              :loading="resetting"
+            >
+              重置会话
+            </el-button>
+            <el-button
+              :icon="View"
+              @click="loadHistory()"
+              :loading="loadingHistory"
+            >
+              加载历史
+            </el-button>
           </div>
         </div>
-      </el-card>
-
-      <!-- Extra Details -->
-      <el-card class="detail-section" shadow="never" v-if="agent.details">
-        <template #header>
-          <div class="section-header">
-            <el-icon><Document /></el-icon>
-            原始详情
-          </div>
-        </template>
-        <pre class="raw-details">{{ JSON.stringify(agent.details, null, 2) }}</pre>
-      </el-card>
-
-      <!-- Action Buttons -->
-      <div class="action-bar">
-        <el-button
-          type="danger"
-          :icon="Refresh"
-          @click="handleResetSession"
-          :loading="resetting"
-        >
-          重置会话
-        </el-button>
-        <el-button
-          :icon="View"
-          @click="loadHistory"
-          :loading="loadingHistory"
-        >
-          加载历史
-        </el-button>
       </div>
     </template>
+    <!-- 图片放大预览 -->
+    <el-image-viewer
+      v-if="previewImageUrl"
+      :url-list="[previewImageUrl]"
+      :z-index="4000"
+      hide-on-click-modal
+      @close="previewImageUrl = ''"
+    />
   </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, type Component } from 'vue'
+import { ref, computed, watch, nextTick, type Component } from 'vue'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
@@ -177,7 +231,7 @@ import DOMPurify from 'dompurify'
 import type { AgentInfo } from '../stores/agent'
 import { useAgentStore } from '../stores/agent'
 import { ToolRestrictedError } from '../api/gateway'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElImageViewer } from 'element-plus'
 import {
   UserFilled,
   InfoFilled,
@@ -198,10 +252,12 @@ import {
   Finished,
   Avatar,
   Timer,
+  Promotion,
 } from '@element-plus/icons-vue'
 
 interface MessageItem {
   role: string
+  contentType: string
   content: string
 }
 
@@ -233,6 +289,20 @@ const historyCount = ref(0)
 const recentMessages = ref<MessageItem[]>([])
 const loadingHistory = ref(false)
 const resetting = ref(false)
+
+// Chat send
+const chatInput = ref('')
+const sending = ref(false)
+const msgContainerRef = ref<HTMLElement | null>(null)
+
+// 粘贴的图片附件
+interface ImageAttachment {
+  url: string        // data URL 用于预览
+  mediaType: string  // e.g. "image/png"
+  data: string       // base64 数据（不含 data:... 前缀）
+}
+const imageAttachments = ref<ImageAttachment[]>([])
+const previewImageUrl = ref('') // 图片预览弹窗
 
 // Computed
 const displayStatus = computed(() => {
@@ -322,6 +392,8 @@ function roleIcon(msg: MessageItem): Component {
   switch (msg.role.toLowerCase()) {
     case 'user': return User
     case 'assistant': return ChatLineSquare
+    case 'thinking': return ChatLineSquare
+    case 'tool': return ChatLineSquare
     case 'system': return Monitor
     default: return Finished
   }
@@ -332,8 +404,29 @@ function messageClass(msg: MessageItem): string {
   switch (msg.role.toLowerCase()) {
     case 'user': return 'msg-user'
     case 'assistant': return 'msg-assistant'
+    case 'thinking': return 'msg-thinking'
+    case 'tool': return 'msg-tool'
     case 'system': return 'msg-system'
     default: return 'msg-other'
+  }
+}
+
+function bubbleClass(msg: MessageItem): string {
+  if (msg.role === 'user') return 'bubble-user'
+  if (msg.contentType === 'image' || msg.contentType === 'file') return 'bubble-media'
+  if (msg.contentType === 'thinking') return 'bubble-thinking'
+  if (msg.contentType === 'tool_use' || msg.contentType === 'tool_result') return 'bubble-tool'
+  return 'bubble-assistant'
+}
+
+/** 点击消息区域内的图片时放大预览 */
+function handleMsgImageClick(event: MouseEvent): void {
+  const target = event.target as HTMLElement
+  // 找到被点击的 <img>（可能在 markdown-body 内部）
+  const img = target.closest('.markdown-body img') as HTMLImageElement | null
+  if (img?.src) {
+    event.stopPropagation()
+    previewImageUrl.value = img.src
   }
 }
 
@@ -426,77 +519,245 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * 从 content 字段提取纯文本内容
- * 兼容多种格式：
- * 1. 字符串：直接返回
- * 2. 对象数组：[{"type":"text","text":"..."}, {"type":"thinking","thinking":"..."}, ...]
- * 3. 单个对象：{"text":"..."} 或 {"content":"..."}
- * 4. 其他：转为字符串
+ * 将 content 字段按类型拆分为独立片段
+ * 返回 [{ contentType, content }, ...]
+ * 与 agent.ts 中 checkNewMessages()->extractContent() 逻辑保持一致
  */
-function extractTextContent(content: unknown): string {
-  // 1. 字符串直接返回
-  if (typeof content === 'string') return content
-  
-  // 2. 对象数组：提取 type==="text" 的 text 字段
-  if (Array.isArray(content)) {
-    const textParts = content
-      .filter((item: Record<string, unknown>) => {
-        const type = String(item.type ?? '')
-        return type === 'text'
-      })
-      .map((item: Record<string, unknown>) => String(item.text ?? item.content ?? ''))
-      .join('\n')
-    return textParts.trim()
+function splitContentParts(content: unknown): { contentType: string; content: string }[] {
+  // 1. 字符串：整体作为一个 text 片段
+  if (typeof content === 'string') {
+    return [{ contentType: 'text', content }]
   }
-  
-  // 3. 单个对象：尝试提取 text 或 content 字段
+
+  // 2. 对象数组：每个 item 是一个独立片段
+  if (Array.isArray(content)) {
+    const parts = content.map((item: Record<string, unknown>) => {
+      if (!item || typeof item !== 'object') return null
+      const type = String(item.type ?? '')
+      if (type === 'text') {
+        const text = String(item.text ?? item.content ?? '')
+        return text ? { contentType: 'text', content: text } : null
+      }
+      if (type === 'thinking') {
+        const thinking = String(item.thinking ?? '')
+        return thinking ? { contentType: 'thinking', content: thinking } : null
+      }
+      if (type === 'tool_use') {
+        const name = String(item.name ?? '')
+        if (name) return { contentType: 'tool_use', content: `[${name}]` }
+        const input = item.input
+        if (typeof input === 'string' && input) return { contentType: 'tool_use', content: '[工具调用]' }
+        if (typeof input === 'object' && input !== null) return { contentType: 'tool_use', content: '[工具调用]' }
+        return null
+      }
+      if (type === 'tool_result') {
+        const name = String(item.name ?? '')
+        // tool_result 的 content 可能是数组 [{type:'text', text:'...'}]
+        const resultContent = item.content
+        let text = ''
+        if (Array.isArray(resultContent)) {
+          const textParts = resultContent
+            .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
+            .map((r: any) => r.text)
+          if (textParts.length > 0) text = textParts.join('\n').slice(0, 200)
+        }
+        if (!text && typeof item.text === 'string' && item.text) text = item.text
+        if (!text && name) text = `[${name}]`
+        if (!text) text = '[工具结果]'
+        return { contentType: 'tool_result', content: text }
+      }
+      // OpenAI 风格的图片：{ type: 'image_url', image_url: { url } }
+      if (type === 'image_url') {
+        const url = String((item.image_url as Record<string, unknown>)?.url ?? '')
+        if (url) return { contentType: 'image', content: `![](${url})` }
+        return null
+      }
+      // OpenResponses 风格的图片/文件（发送时使用，历史消息也可能以此格式返回）
+      if (type === 'input_image') {
+        const source = item.source as Record<string, unknown> | undefined
+        const data = String(source?.data ?? '')
+        const mediaType = String(source?.media_type ?? 'image/png')
+        if (data) return { contentType: 'image', content: `![](data:${mediaType};base64,${data})` }
+        // 也可能是 URL 来源
+        const srcUrl = String(source?.url ?? '')
+        if (srcUrl) return { contentType: 'image', content: `![](${srcUrl})` }
+        return null
+      }
+      if (type === 'input_file') {
+        const source = item.source as Record<string, unknown> | undefined
+        const filename = String(source?.filename ?? '附件')
+        const data = String(source?.data ?? '')
+        if (data || source?.url) return { contentType: 'file', content: `📎 ${filename}` }
+        return null
+      }
+      return null
+    }).filter(s => s !== null)
+    return parts as { contentType: string; content: string }[]
+  }
+
+  // 3. 单个对象：提取 text 或 content 字段
   if (content && typeof content === 'object') {
     const obj = content as Record<string, unknown>
-    return String(obj.text ?? obj.content ?? '')
+    return [{ contentType: 'text', content: String(obj.text ?? obj.content ?? '') }]
   }
-  
+
   // 4. 其他情况转为字符串
-  return String(content ?? '')
+  return [{ contentType: 'text', content: String(content ?? '') }]
 }
 
 // Actions
-async function loadHistory(): Promise<void> {
+/** 判断滚动条是否在底部附近 */
+function isScrolledToBottom(): boolean {
+  const el = msgContainerRef.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 40
+}
+
+async function loadHistory(silent: boolean = false, scrollToEnd: boolean = true): Promise<void> {
   if (!agent.value?.key) return
-  loadingHistory.value = true
+  const startedAt = Date.now()
+  const MIN_LOADING_MS = 500 // 手动加载时 loading 至少显示 500ms，确保用户能感知到反馈
+  if (!silent) loadingHistory.value = true
   try {
     const history = await store.fetchSessionHistory(agent.value.key)
     historyCount.value = history.length
 
-    // 1. 过滤 tool 相关消息
-    const TOOL_ROLES = ['tool', 'tool_calls', 'tool_result', 'function', 'assistant_tool']
-    const filtered = (history as Record<string, unknown>[]).filter((item) => {
-      const role = String(item.role ?? item.sender ?? '').toLowerCase()
-      return !TOOL_ROLES.includes(role)
+    // 将每条消息按内容类型拆分为独立气泡
+    // 思考、工具调用、工具结果、回复各自独立显示
+    const normalized = (history as Record<string, unknown>[]).flatMap((raw) => {
+      // 解包 message 字段：API 返回的消息可能包在 { message: { role, content } } 中
+      const item = (raw && typeof raw === 'object' && raw.message && typeof raw.message === 'object'
+        ? (raw.message as Record<string, unknown>)
+        : raw) as Record<string, unknown>
+      const role = String(item.role ?? '').toLowerCase()
+      const parts = splitContentParts(item.content)
+
+      return parts.map((part) => {
+        let content = part.content
+        // assistant 消息清洗 thinking 标签（兼容纯文本格式）
+        if (role === 'assistant') {
+          content = cleanContent(content)
+        }
+
+        // 根据内容类型决定气泡角色
+        const bubbleRole = part.contentType === 'thinking' ? 'thinking'
+          : (part.contentType === 'tool_use' || part.contentType === 'tool_result') ? 'tool'
+          : (['user', 'assistant', 'system'].includes(role) ? role : 'assistant')
+
+        return {
+          role: bubbleRole,
+          contentType: part.contentType,
+          content,
+        }
+      })
     })
 
-    // 2. 归一化 + 清洗 assistant 消息
-    const normalized = filtered.map((item) => {
-      const role = String(item.role ?? item.sender ?? '').toLowerCase()
-      let content = extractTextContent(item.content)
-
-      // assistant 消息清洗 thinking 标签
-      if (role === 'assistant') {
-        content = cleanContent(content)
-      }
-
-      return {
-        role: ['user', 'assistant', 'system'].includes(role) ? role : 'assistant',
-        content,
-      }
-    })
-
-    // 3. 过滤清洗后为空的，显示全部消息（REC-100）
+    // 过滤清洗后为空的
     const cleanMessages = normalized.filter((msg) => msg.content.length > 0)
-    recentMessages.value = cleanMessages.reverse()
+    recentMessages.value = cleanMessages
   } finally {
-    loadingHistory.value = false
+    if (!silent) {
+      const elapsed = Date.now() - startedAt
+      const remaining = Math.max(0, MIN_LOADING_MS - elapsed)
+      if (remaining > 0) {
+        await new Promise((r) => setTimeout(r, remaining))
+      }
+      loadingHistory.value = false
+    }
+  }
+  if (scrollToEnd) {
+    // 仅当需要保持底部时才滚动
+    await nextTick()
+    scrollToBottom()
   }
 }
+
+/** 滚动到最后一条消息 */
+function scrollToBottom(): void {
+  const container = msgContainerRef.value
+  if (!container) return
+  // 找到最后一条消息气泡，用 scrollIntoView 精确滚动到底部
+  const lastRow = container.querySelector('.chat-row:last-child') as HTMLElement | null
+  if (lastRow) {
+    lastRow.scrollIntoView({ block: 'end', behavior: 'instant' })
+  } else {
+    container.scrollTop = container.scrollHeight
+  }
+}
+
+/** 处理粘贴事件：捕获剪贴板中的图片 */
+function handlePaste(event: ClipboardEvent): void {
+  const items = event.clipboardData?.items
+  if (!items) return
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      event.preventDefault()
+      const file = item.getAsFile()
+      if (!file) continue
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const result = e.target?.result as string
+        // result 格式: "data:image/png;base64,xxxx"
+        const parts = result.split(',')
+        if (parts.length !== 2) return
+        const mediaType = parts[0].replace('data:', '').replace(';base64', '')
+        imageAttachments.value.push({
+          url: result,
+          mediaType,
+          data: parts[1],
+        })
+      }
+      reader.readAsDataURL(file)
+      break // 只处理第一张图片
+    }
+  }
+}
+
+/** 发送消息到当前会话（与重置会话相同方式：通过后端服务 CLI 命令） */
+async function sendMessage(): Promise<void> {
+  const text = chatInput.value.trim()
+  if ((!text && imageAttachments.value.length === 0) || !agent.value?.key || sending.value) return
+
+  // 有图片时仅发送文本部分（CLI 暂不支持图片）
+  if (imageAttachments.value.length > 0 && !text) return
+  const messageText = text
+
+  sending.value = true
+  try {
+    await store.sendAgentMessage(agent.value.key, messageText)
+
+    chatInput.value = ''
+    imageAttachments.value = []
+
+    ElMessage.success('消息已发送')
+
+    // 发送成功后刷新消息
+    await loadHistory()
+  } catch (e: any) {
+    console.error('[AgentDetailDrawer] sendMessage error:', e)
+    const errorMsg = e?.message || String(e)
+
+    if (errorMsg.includes('missing scope: operator.write')) {
+      ElMessage.warning({
+        message: '权限不足：需要 operator.write 权限。请在 Gateway 配置中设置 gateway.controlUi.dangerouslyDisableDeviceAuth: true 并重启 Gateway，或使用 openclaw devices approve --latest 批准设备。',
+        duration: 6000,
+      })
+    } else if (errorMsg.includes('timeout')) {
+      ElMessage.error('发送超时，请检查 Gateway 是否运行正常')
+    } else {
+      ElMessage.error(`发送失败: ${e.message}`)
+    }
+  } finally {
+    sending.value = false
+  }
+}
+
+// 新消息到达时仅在已处于底部的情况下自动滚动到底部
+watch(recentMessages, () => {
+  if (isScrolledToBottom()) {
+    nextTick(() => scrollToBottom())
+  }
+}, { deep: false })
 
 async function refreshStatus(): Promise<void> {
   if (!agent.value?.key) return
@@ -589,11 +850,26 @@ async function handleResetSession(): Promise<void> {
   }
 }
 
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
 // Watch for drawer open
 watch(drawerVisible, (val) => {
   if (val && agent.value) {
     // Load history on open
     loadHistory()
+    // 抽屉打开期间定时刷新消息
+    refreshTimer = setInterval(() => {
+      if (drawerVisible.value && agent.value) {
+        const wasAtBottom = isScrolledToBottom()
+        loadHistory(true, wasAtBottom) // 静默刷新，不显示 loading，仅在已在底部时保持底部
+      }
+    }, 3000)
+  } else if (!val) {
+    // 关闭抽屉时停止刷新
+    if (refreshTimer !== null) {
+      clearInterval(refreshTimer)
+      refreshTimer = null
+    }
   }
 })
 </script>
@@ -623,8 +899,77 @@ watch(drawerVisible, (val) => {
   gap: 4px;
 }
 
+/* ==================== 左右布局 ==================== */
+.drawer-body {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.drawer-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative; /* 让加载遮罩可以 absolute 覆盖 */
+}
+
+/* ── 左面板滚动容器 (Card + 发送栏 整体滚动) ── */
+.left-scroll-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* ── 消息 Card：纯视觉容器，不管 overflow ── */
+.drawer-left .msg-section {
+  flex: 1;
+}
+
+.drawer-left .msg-section :deep(.el-card) {
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-left .msg-section :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+
+/* ── Card body 内： loading/empty/messages ── */
+.msg-card-inner {
+  flex: 1;
+}
+
+.msg-card-inner.empty-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── 消息气泡列表容器 ── */
+.messages-list-outer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drawer-right {
+  width: 340px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .detail-section {
-  margin-bottom: 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
 }
@@ -717,14 +1062,7 @@ watch(drawerVisible, (val) => {
   margin-top: 8px;
 }
 
-/* Messages list — 聊天气泡样式 */
-.messages-list {
-  max-height: 320px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+/* 聊天气泡样式（由 .messages-list-outer 承载） */
 
 .chat-row {
   display: flex;
@@ -762,6 +1100,46 @@ watch(drawerVisible, (val) => {
   border-bottom-left-radius: 4px;
 }
 
+/* 思考过程：黄色左边框，半透明背景 */
+.bubble-thinking {
+  background: rgba(255, 193, 7, 0.08);
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+  border-left: 3px solid #ffc107;
+  font-style: italic;
+}
+
+.bubble-thinking .markdown-body {
+  opacity: 0.8;
+}
+
+/* 工具调用 / 工具结果：蓝色左边框，半透明背景 */
+.bubble-tool {
+  background: rgba(66, 165, 245, 0.08);
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+  border-left: 3px solid #42a5f5;
+  font-size: 12.5px;
+}
+
+/* 图片/文件：绿色左边框 */
+.bubble-media {
+  background: rgba(76, 175, 80, 0.08);
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+  border-left: 3px solid #66bb6a;
+}
+
+/* 气泡内标签（思考/工具调用/工具结果） */
+.bubble-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  opacity: 0.6;
+}
+
 
 
 /* Text colors */
@@ -789,14 +1167,20 @@ watch(drawerVisible, (val) => {
   flex: 1;
 }
 
-/* Loading */
-.loading-section {
+/* 手动加载历史时左侧消息区域的 loading 遮罩 */
+.left-loading-overlay {
+  position: absolute;
+  inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
   justify-content: center;
-  padding: 20px;
+  gap: 12px;
+  background: var(--bg-card);
   color: var(--text-secondary);
+  font-size: 14px;
+  z-index: 10;
+  border-radius: 8px;
 }
 
 .empty-state {
@@ -820,6 +1204,79 @@ watch(drawerVisible, (val) => {
   max-height: 200px;
   overflow-y: auto;
   color: var(--text-primary);
+}
+
+/* ═══════════ 聊天发送区域 ═══════════ */
+.chat-send-area {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+/* 输入框 + 发送按钮水平排列 */
+.chat-send-area .send-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.chat-send-area .send-row .el-button {
+  flex-shrink: 0;
+  height: fit-content;
+}
+
+/* ── 图片预览条 ── */
+.image-preview-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.image-preview-item {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.image-preview-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  cursor: pointer;
+  transition: transform 0.15s, filter 0.15s;
+}
+
+.image-preview-thumb:hover {
+  transform: scale(1.05);
+  filter: brightness(1.1);
+}
+
+.image-preview-item .image-remove-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  min-width: 0;
+  padding: 0;
+  font-size: 14px;
+  line-height: 20px;
+  border-radius: 50%;
+}
+
+/* 左面板滚动平滑 */
+.left-scroll-wrap {
+  scroll-behavior: smooth;
 }
 </style>
 
@@ -994,8 +1451,6 @@ watch(drawerVisible, (val) => {
   width: 100%;
   display: block;
   overflow-x: auto;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 6px;
 }
 .markdown-body th,
 .markdown-body td {

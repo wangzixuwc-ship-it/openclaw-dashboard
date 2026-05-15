@@ -56,6 +56,7 @@
       :title="isEdit ? '编辑项目' : '新建项目'"
       width="520px"
       destroy-on-close
+      class="project-dialog"
     >
       <ProjectForm
         :project="editingProject"
@@ -118,10 +119,8 @@ function openEdit(id: string) {
 async function handleFormSubmit(data: {
   name: string
   description?: string
-  subPath?: string
-  tags?: string[]
-  progress?: number
-  manualOverride?: boolean
+  projectPath?: string
+  status?: string
 }) {
   if (isEdit.value && editingProject.value) {
     await store.updateProjectData(editingProject.value.id, data)
@@ -236,5 +235,32 @@ onMounted(() => { store.loadProjects() })
   justify-content: center;
   align-items: center;
   min-height: 300px;
+}
+
+/* ==================== REC-083: 弹窗磨砂玻璃背景 ==================== */
+:deep(.project-dialog .el-dialog__wrapper) {
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+:deep(.project-dialog .el-dialog) {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98)) !important;
+  border: 1px solid rgba(66, 165, 245, 0.2);
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+:deep(.project-dialog .el-dialog__header) {
+  border-bottom: 1px solid rgba(66, 165, 245, 0.15) !important;
+  padding: 16px 20px !important;
+}
+
+:deep(.project-dialog .el-dialog__title) {
+  color: #90caf9 !important;
+}
+
+:deep(.project-dialog .el-dialog__body) {
+  padding: 20px !important;
 }
 </style>

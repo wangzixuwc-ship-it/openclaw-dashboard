@@ -1,5 +1,85 @@
 <template>
+  <el-popover
+    v-if="latestMessage"
+    :key="latestMessage"
+    placement="right"
+    width="400px"
+    :offset="12"
+    trigger="manual"
+    :visible="bubbleVisible"
+    class="bubble-popover"
+  >
+    <div class="markdown-body markdown-bubble" :style="{ maxHeight: '160px', overflowY: 'auto' }" v-html="renderedMessage"></div>
+
+    <template #reference>
+      <el-card
+        ref="cardRef"
+        class="agent-card"
+        shadow="hover"
+        @click="openDrawer"
+      >
+        <!-- Header: Name + Status Badge -->
+        <div class="card-header">
+          <div class="agent-identity">
+            <div class="agent-avatar" :class="statusColorClass">
+              <el-icon :size="18"><component :is="avatarIcon" /></el-icon>
+            </div>
+            <span class="agent-name" :title="displayName">{{ displayName }}</span>
+          </div>
+          <el-tag
+            :type="statusTagType"
+            :effect="agent.status === 'running' ? 'dark' : 'light'"
+            size="small"
+            class="status-badge"
+            :title="statusDescription"
+          >
+            <el-icon :size="12"><component :is="statusIcon" /></el-icon>
+            {{ displayStatus }}
+          </el-tag>
+        </div>
+
+        <!-- Body: Metadata + Token -->
+        <div class="card-body">
+          <div class="meta-grid">
+            <div class="meta-item">
+              <span class="meta-label">当前任务</span>
+              <span class="meta-value key-value" :title="agent.label || agent.key">{{ truncateLabel }}</span>
+            </div>
+
+            <div class="meta-item">
+              <span class="meta-label">持续时间</span>
+              <span class="meta-value duration">{{ durationText }}</span>
+            </div>
+          </div>
+
+          <!-- Token Usage Progress Bar -->
+          <div class="token-section" v-if="agent.tokenUsage">
+            <div class="token-header">
+              <span class="meta-label">Token 用量</span>
+              <span class="token-percent" :class="percentageClass">{{ tokenPercent }}%</span>
+            </div>
+            <el-progress
+              :percentage="agent.tokenUsage.percentage"
+              :status="tokenProgressStatus"
+              :stroke-width="6"
+              :show-text="false"
+              class="token-progress"
+            />
+            <div class="token-detail">
+              <span>{{ agent.tokenUsage.current.toLocaleString() }}</span>
+              <span class="token-sep">/</span>
+              <span>{{ agent.tokenUsage.max.toLocaleString() }}</span>
+            </div>
+          </div>
+        </div>
+      </el-card>
+    </template>
+  </el-popover>
+
+   <!-- 没有气泡时直接渲染卡片 -->
   <el-card
+    v-else
+    ref="cardRef"
     class="agent-card"
     shadow="hover"
     @click="openDrawer"
@@ -62,7 +142,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import type { AgentInfo } from '../stores/agent'
 import { useAgentStore } from '../stores/agent'
 import {
@@ -77,6 +159,7 @@ import {
 
 const props = defineProps<{
   agent: AgentInfo
+  latestMessage?: string
 }>()
 
 const emit = defineEmits<{
@@ -84,6 +167,21 @@ const emit = defineEmits<{
 }>()
 
 const store = useAgentStore()
+
+const renderedMessage = computed(() => {
+  if (!props.latestMessage) return ''
+  const html = marked.parse(props.latestMessage) as string
+  return DOMPurify.sanitize(html)
+})
+
+// el-popover 可见性控制
+// REC-080: 完全依赖 store 的 messageBubbles 状态（BUBBLE_DURATION = 10s）
+const bubbleVisible = ref(!!props.latestMessage)
+const cardRef = ref<HTMLElement>()
+
+watch(() => props.latestMessage, (newVal) => {
+  bubbleVisible.value = !!newVal
+}, { immediate: true })
 
 const statusTagType = computed(() => {
   switch (props.agent.status) {
@@ -126,7 +224,6 @@ const displayStatus = computed(() => {
   return map[props.agent.status] ?? props.agent.status
 })
 
-// Status description for tooltip
 const statusDescription = computed(() => {
   const descriptions: Record<string, string> = {
     running: 'Agent 正在执行任务',
@@ -190,11 +287,11 @@ function openDrawer(): void {
 </script>
 
 <style scoped>
+/* ==================== Card ==================== */
 .agent-card {
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   border-radius: 10px;
-  overflow: hidden;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
 }
@@ -209,7 +306,7 @@ function openDrawer(): void {
   padding: 14px;
 }
 
-/* --- Header --- */
+/* ==================== Header ==================== */
 .card-header {
   display: flex;
   align-items: center;
@@ -252,7 +349,7 @@ function openDrawer(): void {
   padding: 0 8px;
 }
 
-/* --- Body --- */
+/* ==================== Body ==================== */
 .card-body {
   font-size: 13px;
 }
@@ -297,7 +394,7 @@ function openDrawer(): void {
   font-variant-numeric: tabular-nums;
 }
 
-/* --- Token Section --- */
+/* ==================== Token ==================== */
 .token-section {
   margin-top: 10px;
   padding-top: 10px;
@@ -333,62 +430,66 @@ function openDrawer(): void {
   opacity: 0.5;
 }
 
-/* --- Footer --- */
-.card-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color);
-}
-
-.action-btn {
-  padding: 6px 14px !important;
-  border-radius: 6px !important;
-  font-size: 12px !important;
-  font-weight: 500 !important;
-  transition: all 0.2s !important;
-  border: 1px solid transparent !important;
-}
-
-/* 刷新按钮 - 中性色 */
-.action-btn:first-child,
-.action-btn:first-child:hover,
-.action-btn:first-child:focus {
-  color: var(--text-secondary) !important;
-  background: rgba(255, 255, 255, 0.05) !important;
-  border-color: var(--border-color) !important;
-}
-.action-btn:first-child:hover {
-  color: var(--text-primary) !important;
-  background: rgba(255, 255, 255, 0.1) !important;
-  border-color: var(--accent) !important;
-}
-
-/* 详情按钮 - 强调色（覆盖 Element Plus type="primary"） */
-.action-btn.el-button--primary,
-.action-btn.el-button--primary:hover,
-.action-btn.el-button--primary:focus {
-  color: #fff !important;
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
-}
-.action-btn.el-button--primary:hover {
-  background: var(--accent-hover) !important;
-  box-shadow: 0 2px 8px var(--accent-glow) !important;
-}
-
-/* --- Status Colors --- */
+/* ==================== Status Colors ==================== */
 .status-running { background: rgba(76, 175, 80, 0.15); color: #4caf50; }
 .status-idle { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
 .status-error { background: rgba(244, 67, 54, 0.15); color: #f44336; }
 .status-aborted { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
 .status-unknown { background: rgba(156, 163, 175, 0.15); color: #9ca3af; }
 
-/* --- Text Colors --- */
 .text-success { color: #4caf50; font-weight: 600; }
 .text-warning { color: #ffc107; font-weight: 600; }
 .text-danger { color: #f44336; font-weight: 600; }
 .text-info { color: #9e9e9e; font-weight: 600; }
+
+</style>
+
+<!-- ════════════════════════════════════════════════
+     非 scoped 样式：el-popover 使用 Teleport 渲染到 body 层，
+     scoped 样式无法穿透，必须放在非 scoped 块中
+     ════════════════════════════════════════════════ -->
+<style>
+/* ==================== REC-071: 气泡弹出框 ==================== */
+.el-popover.bubble-popover {
+  background: linear-gradient(135deg, rgba(26, 26, 46, 0.95), rgba(18, 18, 36, 0.98)) !important;
+  border: 1px solid rgba(66, 165, 245, 0.35) !important;
+  border-radius: 10px !important;
+  box-shadow:
+    0 4px 16px rgba(33, 150, 243, 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.4) !important;
+  padding: 10px 14px !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+/* ==================== REC-081: 气泡动画 ==================== */
+@keyframes bubbleSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes bubbleFadeOut {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-10px) scale(0.95);
+  }
+}
+
+.bubble-popover {
+  animation: bubbleSlideIn 0.3s ease-out;
+}
+
+.markdown-bubble {
+  animation: bubbleSlideIn 0.3s ease-out;
+}
 </style>
