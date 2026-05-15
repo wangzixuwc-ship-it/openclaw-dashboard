@@ -11,10 +11,10 @@
 
         <div class="status-indicators">
           <!-- 视图切换 (REC-067) -->
-          <!-- <el-radio-group v-model="activeView" size="small" class="view-switcher">
+          <el-radio-group v-model="activeView" size="small" class="view-switcher">
             <el-radio-button value="agent">Agent 看板</el-radio-button>
             <el-radio-button value="project">项目监控</el-radio-button>
-          </el-radio-group> -->
+          </el-radio-group>
 
           <!-- Gateway Version -->
           <div class="indicator indicator-version">
@@ -56,32 +56,34 @@
       </div>
     </header>
 
-    <!-- ========= 2. 统计区 ========= -->
-    <section class="stats-section">
-      <div class="stats-inner">
-        <el-card
-          v-for="stat in statsCards"
-          :key="stat.label"
-          class="stat-card"
-          :class="stat.class"
-          shadow="hover"
-          @click="stat.onClick?.()"
-        >
-          <div class="stat-card-inner">
-            <div class="stat-icon-wrap" :class="stat.iconClass">
-              <el-icon :size="26"><component :is="stat.icon" /></el-icon>
-            </div>
-            <div class="stat-text">
-              <div class="stat-number">{{ stat.value }}</div>
-              <div class="stat-label">
-                {{ stat.label }}
-                <span v-if="stat.subtitle" class="stat-subtitle">{{ stat.subtitle }}</span>
+    <!-- ========= 2. 统计区（Agent 看板时显示）========= -->
+    <Transition name="view-fade">
+      <section v-if="activeView === 'agent'" class="stats-section">
+        <div class="stats-inner">
+          <el-card
+            v-for="stat in statsCards"
+            :key="stat.label"
+            class="stat-card"
+            :class="stat.class"
+            shadow="hover"
+            @click="stat.onClick?.()"
+          >
+            <div class="stat-card-inner">
+              <div class="stat-icon-wrap" :class="stat.iconClass">
+                <el-icon :size="26"><component :is="stat.icon" /></el-icon>
+              </div>
+              <div class="stat-text">
+                <div class="stat-number">{{ stat.value }}</div>
+                <div class="stat-label">
+                  {{ stat.label }}
+                  <span v-if="stat.subtitle" class="stat-subtitle">{{ stat.subtitle }}</span>
+                </div>
               </div>
             </div>
-          </div>
-        </el-card>
-      </div>
-    </section>
+          </el-card>
+        </div>
+      </section>
+    </Transition>
 
     <!-- ========= 3. 看板主体（5列：空闲/运行中/已终止/错误/未知） ========= -->
     <main class="board-container" v-if="activeView === 'agent'">
@@ -101,7 +103,7 @@
             v-for="agent in store.idleAgents"
             :key="agent.key"
             :agent="agent"
-            :latest-message="store.getAgentBubble(agent.key)"
+            :latest-messages="store.getAgentBubbles(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.idleAgents.length === 0 && !store.loading" description="暂无空闲的 Agent" :image-size="50" />
@@ -124,7 +126,7 @@
             v-for="agent in store.runningAgents"
             :key="agent.key"
             :agent="agent"
-            :latest-message="store.getAgentBubble(agent.key)"
+            :latest-messages="store.getAgentBubbles(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.runningAgents.length === 0" description="暂无运行中的 Agent" :image-size="50" />
@@ -147,7 +149,7 @@
             v-for="agent in store.abortedAgents"
             :key="agent.key"
             :agent="agent"
-            :latest-message="store.getAgentBubble(agent.key)"
+            :latest-messages="store.getAgentBubbles(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.abortedAgents.length === 0" description="暂无已终止的 Agent" :image-size="50" />
@@ -170,7 +172,7 @@
             v-for="agent in store.errorAgents"
             :key="agent.key"
             :agent="agent"
-            :latest-message="store.getAgentBubble(agent.key)"
+            :latest-messages="store.getAgentBubbles(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.errorAgents.length === 0" description="暂无错误的 Agent" :image-size="50" />
@@ -193,7 +195,7 @@
             v-for="agent in store.unknownAgents"
             :key="agent.key"
             :agent="agent"
-            :latest-message="store.getAgentBubble(agent.key)"
+            :latest-messages="store.getAgentBubbles(agent.key)"
             @detail="onAgentDetail"
           />
           <el-empty v-if="store.unknownAgents.length === 0" description="暂无未知状态的 Agent" :image-size="50" />
@@ -202,7 +204,9 @@
     </main>
 
     <!-- 项目监控视图 (REC-067) -->
-    <ProjectMonitor v-if="activeView === 'project'" />
+    <Transition name="view-fade">
+      <ProjectMonitor v-if="activeView === 'project'" />
+    </Transition>
 
     <!-- Agent Detail Drawer -->
     <AgentDetailDrawer
@@ -218,6 +222,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore, type AgentInfo } from '../stores/agent'
+import { useProjectStore } from '../stores/project'
 import AgentCard from '../components/AgentCard.vue'
 import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
 import TokenDetailDialog from '../components/TokenDetailDialog.vue'
@@ -235,6 +240,7 @@ import {
 } from '@element-plus/icons-vue'
 
 const store = useAgentStore()
+const projectStore = useProjectStore()
 
 // 视图切换 (REC-067)
 const STORAGE_KEY = 'openclaw_dashboard_active_view'
@@ -374,12 +380,13 @@ function onAgentDetail(agent: AgentInfo): void {
 }
 
 async function refreshAll(): Promise<void> {
-  await Promise.all([store.fetchAgents(), store.fetchHealth()])
+  await Promise.all([store.fetchAgents(), store.fetchHealth(), projectStore.loadProjects()])
 }
 
 onMounted(() => {
   refreshAll()
   store.subscribeAgents()
+  projectStore.loadProjects()
   // Start real-time clock
   updateClock()
   clockTimer = setInterval(updateClock, 60 * 1000) // update every minute
@@ -695,6 +702,22 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* ==================== VIEW TRANSITION ==================== */
+.view-fade-enter-active,
+.view-fade-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.view-fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.view-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 /* ==================== RESPONSIVE ==================== */

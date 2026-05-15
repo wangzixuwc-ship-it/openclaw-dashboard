@@ -191,26 +191,14 @@
 
           <!-- Action Buttons -->
           <div class="action-bar">
-            <el-popconfirm
-              title="确认重置会话？此操作不可撤销。"
-              confirm-button-text="确认重置"
-              cancel-button-text="取消"
-              confirm-button-type="danger"
-              width="260"
-              :z-index="4000"
-              @confirm="handleResetSession"
-              :disabled="resetting"
+            <el-button
+              type="danger"
+              :icon="Refresh"
+              @click="handleResetSession"
+              :loading="resetting"
             >
-              <template #reference>
-                <el-button
-                  type="danger"
-                  :icon="Refresh"
-                  :loading="resetting"
-                >
-                  重置会话
-                </el-button>
-              </template>
-            </el-popconfirm>
+              重置会话
+            </el-button>
             <el-button
               :icon="View"
               @click="loadHistory()"
@@ -795,6 +783,16 @@ async function handleResetSession(): Promise<void> {
   if (!agent.value?.key) return
   
   try {
+    await ElMessageBox.confirm(
+      `确定要重置 "${displayAgentName.value}" 的会话吗？这将执行命令：openclaw agent --agent ${agent.value.key.split(':')[1] || agent.value.key} --message "/reset"`,
+      '重置会话',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    
     resetting.value = true
     await store.resetSession(agent.value.key)
     ElMessage.success('已执行重置命令')

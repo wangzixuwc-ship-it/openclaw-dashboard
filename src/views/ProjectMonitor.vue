@@ -2,45 +2,155 @@
   <div class="project-monitor">
     <!-- 工具栏 -->
     <div class="project-monitor__toolbar">
-      <div class="project-monitor__toolbar-left">
-        <h2 class="project-monitor__title">
-          <el-icon :size="20" style="color: #42a5f5;"><Monitor /></el-icon>
-          项目监控
-        </h2>
-        <div class="project-monitor__stats">
-          <el-tag
-            v-for="s in statusItems"
-            :key="s.key"
-            :type="s.type"
-            size="small"
-            effect="dark"
-          >
-            {{ s.label }}: {{ store.statusCounts[s.key] }}
-          </el-tag>
-        </div>
-      </div>
+      <h2 class="project-monitor__title">
+        <el-icon :size="20" style="color: #42a5f5;"><Monitor /></el-icon>
+        项目监控
+      </h2>
       <div class="project-monitor__toolbar-right">
         <el-button :icon="Refresh" circle size="small" @click="handleScanAll" :loading="scanLoading" title="扫描所有项目" />
-        <el-button type="primary" :icon="Plus" size="small" @click="openCreate">新建项目</el-button>
       </div>
     </div>
 
-    <!-- 项目卡片网格 -->
-    <div v-loading="store.loading" class="project-monitor__grid">
-      <ProjectCard
-        v-for="project in store.projects"
-        :key="project.id"
-        :project="project"
-        @click="openDetail(project)"
-        @command="(cmd: string) => handleCommand(cmd, project)"
-      />
-
-      <div v-if="store.projects.length === 0 && !store.loading" class="project-monitor__empty">
-        <el-empty description="暂无项目" :image-size="80">
-          <el-button type="primary" @click="openCreate">创建第一个项目</el-button>
-        </el-empty>
+    <!-- 项目统计卡片（对齐 Agent 看板 stats-section） -->
+    <section class="stats-section">
+      <div class="stats-inner">
+        <el-card
+          v-for="stat in projectStats"
+          :key="stat.label"
+          class="stat-card"
+          :class="stat.cardClass"
+          shadow="hover"
+        >
+          <div class="stat-card-inner">
+            <div class="stat-icon-wrap" :class="stat.iconClass">
+              <el-icon :size="26"><component :is="stat.icon" /></el-icon>
+            </div>
+            <div class="stat-text">
+              <div class="stat-number">{{ stat.value }}</div>
+              <div class="stat-label">{{ stat.label }}</div>
+            </div>
+          </div>
+        </el-card>
       </div>
-    </div>
+    </section>
+
+    <!-- 看板主体（按状态分列，完全复刻 Agent 看板布局） -->
+    <main class="board-container" v-loading="store.loading && store.projects.length === 0">
+      <!-- 待启动列 -->
+      <div class="board-column board-column-pending">
+        <div class="board-column-header" style="border-bottom-color: #ffc107;">
+          <span style="color: #ffc107; font-weight: 700; font-size: 13px;">
+            <el-icon><Clock /></el-icon>
+            待启动
+          </span>
+          <el-tag size="small" style="background: rgba(255,193,7,0.15); color: #ffc107; border-color: #ffc107;">
+            {{ pendingCount }} 个
+          </el-tag>
+        </div>
+        <div class="board-column-tasks">
+          <ProjectCard
+            v-for="project in pendingProjects"
+            :key="project.id"
+            :project="project"
+            @click="openDetail(project)"
+            @command="(cmd: string) => handleCommand(cmd, project)"
+          />
+          <el-empty v-if="pendingCount === 0" description="暂无待启动的项目" :image-size="50" />
+        </div>
+      </div>
+
+      <!-- 运行中列 -->
+      <div class="board-column board-column-running">
+        <div class="board-column-header" style="border-bottom-color: #4caf50;">
+          <span style="color: #4caf50; font-weight: 700; font-size: 13px;">
+            <el-icon><VideoPlay /></el-icon>
+            运行中
+          </span>
+          <el-tag size="small" style="background: rgba(76,175,80,0.15); color: #4caf50; border-color: #4caf50;">
+            {{ runningCount }} 个
+          </el-tag>
+        </div>
+        <div class="board-column-tasks">
+          <ProjectCard
+            v-for="project in runningProjects"
+            :key="project.id"
+            :project="project"
+            @click="openDetail(project)"
+            @command="(cmd: string) => handleCommand(cmd, project)"
+          />
+          <el-empty v-if="runningCount === 0" description="暂无运行中的项目" :image-size="50" />
+        </div>
+      </div>
+
+      <!-- 已暂停列 -->
+      <div class="board-column board-column-paused">
+        <div class="board-column-header" style="border-bottom-color: #f97316;">
+          <span style="color: #f97316; font-weight: 700; font-size: 13px;">
+            <el-icon><VideoPause /></el-icon>
+            已暂停
+          </span>
+          <el-tag size="small" style="background: rgba(249,115,22,0.15); color: #f97316; border-color: #f97316;">
+            {{ pausedCount }} 个
+          </el-tag>
+        </div>
+        <div class="board-column-tasks">
+          <ProjectCard
+            v-for="project in pausedProjects"
+            :key="project.id"
+            :project="project"
+            @click="openDetail(project)"
+            @command="(cmd: string) => handleCommand(cmd, project)"
+          />
+          <el-empty v-if="pausedCount === 0" description="暂无已暂停的项目" :image-size="50" />
+        </div>
+      </div>
+
+      <!-- 已完成列 -->
+      <div class="board-column board-column-completed">
+        <div class="board-column-header" style="border-bottom-color: #8b5cf6;">
+          <span style="color: #8b5cf6; font-weight: 700; font-size: 13px;">
+            <el-icon><CircleCheck /></el-icon>
+            已完成
+          </span>
+          <el-tag size="small" style="background: rgba(139,92,246,0.15); color: #8b5cf6; border-color: #8b5cf6;">
+            {{ completedCount }} 个
+          </el-tag>
+        </div>
+        <div class="board-column-tasks">
+          <ProjectCard
+            v-for="project in completedProjects"
+            :key="project.id"
+            :project="project"
+            @click="openDetail(project)"
+            @command="(cmd: string) => handleCommand(cmd, project)"
+          />
+          <el-empty v-if="completedCount === 0" description="暂无已完成的项目" :image-size="50" />
+        </div>
+      </div>
+
+      <!-- 异常列 -->
+      <div class="board-column board-column-error">
+        <div class="board-column-header" style="border-bottom-color: #f44336;">
+          <span style="color: #f44336; font-weight: 700; font-size: 13px;">
+            <el-icon><CircleCloseFilled /></el-icon>
+            异常
+          </span>
+          <el-tag size="small" style="background: rgba(244,67,54,0.15); color: #f44336; border-color: #f44336;">
+            {{ errorCount }} 个
+          </el-tag>
+        </div>
+        <div class="board-column-tasks">
+          <ProjectCard
+            v-for="project in errorProjects"
+            :key="project.id"
+            :project="project"
+            @click="openDetail(project)"
+            @command="(cmd: string) => handleCommand(cmd, project)"
+          />
+          <el-empty v-if="errorCount === 0" description="暂无异常的项目" :image-size="50" />
+        </div>
+      </div>
+    </main>
 
     <!-- 详情抽屉 -->
     <ProjectDetailDrawer
@@ -49,43 +159,79 @@
       :project="selectedProject"
       @edit="openEdit(selectedProject.id)"
     />
-
-    <!-- 新建/编辑对话框 -->
-    <el-dialog
-      v-model="dialogVisible"
-      :title="isEdit ? '编辑项目' : '新建项目'"
-      width="520px"
-      destroy-on-close
-      class="project-dialog"
-    >
-      <ProjectForm
-        :project="editingProject"
-        @submit="handleFormSubmit"
-        @cancel="dialogVisible = false"
-      />
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useProjectStore } from '../stores/project'
 import type { Project } from '../types'
 import ProjectCard from '../components/ProjectCard.vue'
 import ProjectDetailDrawer from '../components/ProjectDetailDrawer.vue'
-import ProjectForm from '../components/ProjectForm.vue'
-import { Monitor, Refresh, Plus } from '@element-plus/icons-vue'
+import { Monitor, Refresh, FolderOpened, Clock, VideoPlay, VideoPause, CircleCheck, CircleCloseFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const store = useProjectStore()
 
-const statusItems = [
-  { key: 'pending', label: '待启动', type: 'info' as const },
-  { key: 'active', label: '进行中', type: 'success' as const },
-  { key: 'paused', label: '已暂停', type: 'warning' as const },
-  { key: 'completed', label: '已完成', type: '' as const },
-  { key: 'error', label: '异常', type: 'danger' as const },
-]
+// ─── 项目状态统计卡片（对齐 Agent 看板 statsCards） ───
+const projectStats = computed(() => [
+  {
+    label: '项目总数',
+    value: store.projectCount,
+    icon: FolderOpened,
+    iconClass: 'icon-blue',
+    cardClass: 'stat-total',
+  },
+  {
+    label: '运行中',
+    value: runningCount.value,
+    icon: VideoPlay,
+    iconClass: 'icon-green',
+    cardClass: 'stat-running',
+  },
+  {
+    label: '已完成',
+    value: completedCount.value,
+    icon: CircleCheck,
+    iconClass: 'icon-purple',
+    cardClass: 'stat-completed',
+  },
+  {
+    label: '已暂停',
+    value: pausedCount.value,
+    icon: VideoPause,
+    iconClass: 'icon-orange',
+    cardClass: 'stat-paused',
+  },
+  {
+    label: '待启动',
+    value: pendingCount.value,
+    icon: Clock,
+    iconClass: 'icon-yellow',
+    cardClass: 'stat-idle',
+  },
+  {
+    label: '异常',
+    value: errorCount.value,
+    icon: CircleCloseFilled,
+    iconClass: 'icon-red',
+    cardClass: 'stat-error',
+  },
+])
+
+// ─── 按状态分类的项目列表（running/active 视为同义） ───
+const pendingProjects = computed(() => store.projects.filter(p => p.status === 'pending'))
+const runningProjects = computed(() => store.projects.filter(p => p.status === 'running' || p.status === 'active'))
+const pausedProjects = computed(() => store.projects.filter(p => p.status === 'paused'))
+const completedProjects = computed(() => store.projects.filter(p => p.status === 'completed'))
+const errorProjects = computed(() => store.projects.filter(p => p.status === 'error'))
+
+// ─── 各列数量 ───
+const pendingCount = computed(() => pendingProjects.value.length)
+const runningCount = computed(() => runningProjects.value.length)
+const pausedCount = computed(() => pausedProjects.value.length)
+const completedCount = computed(() => completedProjects.value.length)
+const errorCount = computed(() => errorProjects.value.length)
 
 // 详情抽屉
 const detailVisible = ref(false)
@@ -96,41 +242,7 @@ function openDetail(project: Project) {
   detailVisible.value = true
 }
 
-// 对话框
-const dialogVisible = ref(false)
-const isEdit = ref(false)
-const editingProject = ref<Project | null>(null)
 const scanLoading = ref(false)
-
-function openCreate() {
-  isEdit.value = false
-  editingProject.value = null
-  dialogVisible.value = true
-}
-
-function openEdit(id: string) {
-  const p = store.projects.find((x) => x.id === id)
-  if (!p) return
-  isEdit.value = true
-  editingProject.value = p
-  dialogVisible.value = true
-}
-
-async function handleFormSubmit(data: {
-  name: string
-  description?: string
-  projectPath?: string
-  status?: string
-}) {
-  if (isEdit.value && editingProject.value) {
-    await store.updateProjectData(editingProject.value.id, data)
-    ElMessage.success('项目已更新')
-  } else {
-    await store.createNewProject(data)
-    ElMessage.success('项目已创建')
-  }
-  dialogVisible.value = false
-}
 
 async function handleCommand(cmd: string, project: Project) {
   switch (cmd) {
@@ -143,10 +255,6 @@ async function handleCommand(cmd: string, project: Project) {
     case 'setActive':
       await store.setActive(project.id)
       ElMessage.success(`${project.name} 已设为活跃项目`)
-      break
-
-    case 'edit':
-      openEdit(project.id)
       break
 
     case 'detail':
@@ -194,12 +302,6 @@ onMounted(() => { store.loadProjects() })
   gap: 12px;
 }
 
-.project-monitor__toolbar-left {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .project-monitor__title {
   margin: 0;
   font-size: 18px;
@@ -210,34 +312,152 @@ onMounted(() => { store.loadProjects() })
   gap: 8px;
 }
 
-.project-monitor__stats {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .project-monitor__toolbar-right {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-.project-monitor__grid {
+/* ==================== 统计卡片区域（对齐 Agent 看板 stats-section） ==================== */
+.stats-section {
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+  margin: -20px -24px 20px;
+  padding: 0 24px;
+}
+
+.stats-inner {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-  min-height: 200px;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 14px;
+  padding: 16px 0;
 }
 
-.project-monitor__empty {
-  grid-column: 1 / -1;
+.stat-card {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  transition: all 0.3s;
+}
+
+.stat-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px var(--accent-glow);
+  transform: translateY(-2px);
+}
+
+.stat-card :deep(.el-card__body) {
+  padding: 12px 16px;
+}
+
+.stat-card-inner {
   display: flex;
-  justify-content: center;
   align-items: center;
-  min-height: 300px;
+  gap: 14px;
 }
 
-/* ==================== REC-083: 弹窗磨砂玻璃背景 ==================== */
+.stat-icon-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.stat-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-number {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-total { border-left: 3px solid #409eff; }
+.stat-running { border-left: 3px solid #67c23a; }
+.stat-completed { border-left: 3px solid #8b5cf6; }
+.stat-paused { border-left: 3px solid #f97316; }
+.stat-idle { border-left: 3px solid #ffc107; }
+.stat-error { border-left: 3px solid #f44336; }
+
+.icon-blue { background: rgba(64, 158, 255, 0.15); color: #409eff; }
+.icon-green { background: rgba(103, 194, 58, 0.15); color: #67c23a; }
+.icon-yellow { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
+.icon-red { background: rgba(244, 67, 54, 0.15); color: #f44336; }
+.icon-purple { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
+.icon-orange { background: rgba(249, 115, 22, 0.15); color: #f97316; }
+
+/* ==================== 看板布局（完全复刻 Agent 看板） ==================== */
+.board-container {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px 24px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 16px;
+}
+
+.board-column {
+  flex: 1;
+  min-width: 240px;
+  max-width: 400px;
+  background: #0f172a;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: visible;
+  transition: border-color 0.2s;
+}
+
+.board-column:hover {
+  border-color: #334155;
+}
+
+.board-column-header {
+  padding: 14px 16px;
+  border-bottom: 2px solid transparent;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.board-column-tasks {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ==================== 响应式 ==================== */
+@media (max-width: 1200px) {
+  .stats-inner {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .stats-inner {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ==================== 弹窗磨砂玻璃背景 ==================== */
 :deep(.project-dialog .el-dialog__wrapper) {
   background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(8px);

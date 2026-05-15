@@ -164,19 +164,20 @@ function handleCommand(cmd: string) {
 </script>
 
 <style scoped>
+/* ==================== Card ==================== */
 .project-card {
-  background: #1e293b;
-  border: 1px solid var(--border-color, #334155);
-  border-radius: 10px;
-  padding: 16px;
   cursor: pointer;
-  transition: all 0.25s;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  padding: 14px;
 }
 
 .project-card:hover {
-  border-color: #42a5f5;
-  box-shadow: 0 4px 16px rgba(66, 165, 245, 0.15);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px var(--accent-glow);
+  border-color: var(--accent);
 }
 
 .project-card--active {
@@ -193,30 +194,36 @@ function handleCommand(cmd: string) {
   border-color: #f44336;
 }
 
+/* ==================== Header ==================== */
 .project-card__header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 8px;
+  align-items: center;
+  margin-bottom: 10px;
 }
 
 .project-card__title-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex: 1;
   min-width: 0;
 }
 
 .project-card__active-badge {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 6px;
+  padding: 0 8px;
 }
 
 .project-card__title {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary, #e2e8f0);
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -224,14 +231,15 @@ function handleCommand(cmd: string) {
 
 .project-card__menu-btn {
   flex-shrink: 0;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--text-secondary);
   font-size: 18px;
 }
 
+/* ==================== Body ==================== */
 .project-card__desc {
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   font-size: 13px;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--text-secondary);
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -240,31 +248,37 @@ function handleCommand(cmd: string) {
 }
 
 .project-card__path {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 11px;
-  font-family: 'Consolas', 'Courier New', monospace;
-  color: var(--text-secondary, #64748b);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* ==================== Progress ==================== */
 .project-card__progress {
-  margin-bottom: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
 }
 
 .project-card__progress-label {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
-  color: var(--text-secondary, #94a3b8);
+  font-size: 11px;
+  color: var(--text-secondary);
   margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 .project-card__progress-value {
   font-weight: 600;
-  color: var(--text-primary, #e2e8f0);
+  color: var(--text-primary);
+  font-size: 13px;
 }
 
 .project-card__manual-tag {
@@ -273,11 +287,12 @@ function handleCommand(cmd: string) {
 }
 
 .project-card__task-summary {
-  font-size: 11px;
-  color: var(--text-secondary, #64748b);
-  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-top: 2px;
 }
 
+/* ==================== Footer ==================== */
 .project-card__footer {
   display: flex;
   justify-content: space-between;
@@ -287,9 +302,10 @@ function handleCommand(cmd: string) {
 
 .project-card__time {
   font-size: 11px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary);
 }
 
+/* ==================== Tags ==================== */
 .project-card__tags {
   display: flex;
   flex-wrap: wrap;
@@ -298,6 +314,33 @@ function handleCommand(cmd: string) {
 
 .project-card__tag {
   font-size: 11px;
+}
+
+/* ==================== Dropdown ==================== */
+:deep(.el-dropdown-menu__item) {
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 6px 16px;
+}
+
+:deep(.el-dropdown-menu__item:hover) {
+  background: rgba(66, 165, 245, 0.1);
+  color: var(--accent);
+}
+
+:deep(.el-dropdown-menu__item.is-disabled) {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+:deep(.el-dropdown-menu__item .el-icon) {
+  margin-right: 6px;
+  font-size: 14px;
+}
+
+/* ==================== Progress ==================== */
+:deep(.el-progress-bar__outer) {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 :deep(.el-progress__text) {

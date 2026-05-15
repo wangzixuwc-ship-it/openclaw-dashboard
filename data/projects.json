@@ -1,7 +1,38 @@
 {
   "version": "1.0",
-  "lastUpdated": "2026-05-14T11:51:25.102Z",
-  "activeProjectId": null,
+  "lastUpdated": "2026-05-15T18:17:51.301Z",
+  "activeProjectId": "proj-001",
   "scanIntervalMs": 30000,
-  "projects": []
+  "projects": [
+    {
+      "id": "proj-001",
+      "name": "测试项目",
+      "description": "",
+      "rootPath": "D:\\ai_test",
+      "subPath": "",
+      "status": "active",
+      "progress": 0,
+      "manualOverride": false,
+      "tags": [],
+      "linkedAgents": [],
+      "taskQueue": [],
+      "createdAt": "2026-05-15T12:30:42.642Z",
+      "updatedAt": "2026-05-15T18:17:51.301Z"
+    },
+    {
+      "id": "proj-002",
+      "name": "OpenClaw监控台",
+      "description": "",
+      "rootPath": "D:\\AI\\openclaw-dashboard",
+      "subPath": "",
+      "status": "paused",
+      "progress": 0,
+      "manualOverride": false,
+      "tags": [],
+      "linkedAgents": [],
+      "taskQueue": [],
+      "createdAt": "2026-05-15T15:31:25.610Z",
+      "updatedAt": "2026-05-15T18:17:51.301Z"
+    }
+  ]
 }

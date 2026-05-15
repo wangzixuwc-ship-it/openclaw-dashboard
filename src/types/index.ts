@@ -7,7 +7,7 @@
 
 // ── Project Monitor Types (REC-067) ──
 
-export type ProjectStatus = 'pending' | 'active' | 'paused' | 'completed' | 'error'
+export type ProjectStatus = 'pending' | 'running' | 'active' | 'paused' | 'completed' | 'error'
 export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'error'
 
 export interface ProjectTask {

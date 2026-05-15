@@ -33,7 +33,7 @@ http.interceptors.response.use(
  * @returns [projects[], activeProjectId]
  */
 export function fetchProjects(): Promise<{ projects: Project[]; activeProjectId: string | null }> {
-  return http.get('/').then((d) => {
+  return http.get('').then((d) => {
     const data = (d as any)?.data ?? d
     return {
       projects: Array.isArray(data?.projects) ? data.projects : [],
@@ -55,7 +55,7 @@ export function fetchProject(id: string): Promise<Project> {
  * 后端返回: { success: true, project }
  */
 export function createProject(payload: ProjectCreatePayload): Promise<Project> {
-  return http.post('/', payload).then((d) => (d as any)?.project ?? d)
+  return http.post('', payload).then((d) => (d as any)?.project ?? d)
 }
 
 /**

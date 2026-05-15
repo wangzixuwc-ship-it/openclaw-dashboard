@@ -94,7 +94,7 @@ export const useAgentStore = defineStore('agent', () => {
     content: string
     timestamp: number
   }
-  const messageBubbles = ref<Record<string, MessageBubbleData>>({})
+  const messageBubbles = ref<Record<string, MessageBubbleData[]>>({})
   const lastMessageCount = ref<Record<string, number>>({})
   let bubbleTimers: Record<string, ReturnType<typeof setTimeout>> = {}
   let messagePollTimer: ReturnType<typeof setInterval> | null = null
@@ -741,25 +741,28 @@ export const useAgentStore = defineStore('agent', () => {
   // ============================================
 
   /**
-   * 显示/更新 Agent 消息气泡
-   * 新消息覆盖旧气泡，重置 3 秒倒计时
+   * 追加一条 Agent 消息气泡（每个 content part 独立气泡）
+   * 按 part 逐条追加，每条独立计时自动消失
    */
   function updateAgentBubble(agentKey: string, content: string): void {
-    // 清除旧定时器
-    if (bubbleTimers[agentKey]) {
-      clearTimeout(bubbleTimers[agentKey])
+    if (!messageBubbles.value[agentKey]) {
+      messageBubbles.value[agentKey] = []
     }
 
-    // 设置新气泡
-    messageBubbles.value[agentKey] = {
+    const entry: MessageBubbleData = {
       content,
       timestamp: Date.now(),
     }
+    messageBubbles.value[agentKey].push(entry)
 
-    // 3 秒后自动消失
-    bubbleTimers[agentKey] = setTimeout(() => {
-      delete messageBubbles.value[agentKey]
-      delete bubbleTimers[agentKey]
+    // 单条定时自动消失
+    setTimeout(() => {
+      const arr = messageBubbles.value[agentKey]
+      if (arr) {
+        const idx = arr.indexOf(entry)
+        if (idx !== -1) arr.splice(idx, 1)
+        if (arr.length === 0) delete messageBubbles.value[agentKey]
+      }
     }, BUBBLE_DURATION)
   }
 
@@ -826,6 +829,54 @@ export const useAgentStore = defineStore('agent', () => {
       return ''
     }
 
+    // 提取消息的各个 content part（不合并，每条独立返回），用于逐条显示气泡
+    function extractContentParts(msg: Record<string, unknown>): string[] {
+      if (typeof msg?.content === 'string') {
+        const c = msg.content as string
+        return c ? [c] : []
+      }
+      if (typeof msg?.content === 'object' && msg.content !== null && !Array.isArray(msg.content)) {
+        const c = msg.content as Record<string, unknown>
+        const text = typeof c.text === 'string' ? c.text : ''
+        return text ? [text] : []
+      }
+      if (Array.isArray(msg?.content)) {
+        const items = msg.content as Array<Record<string, unknown>>
+        const parts = items.map(item => {
+          if (!item || typeof item !== 'object') return ''
+          const t = String(item.type ?? '')
+          if (t === 'text') return (item.text as string) ?? ''
+          if (t === 'thinking') return `💭 ${(item.thinking as string) ?? ''}`
+          if (t === 'tool_use') {
+            const name = String(item.name ?? '')
+            if (name) return `[🔧 ${name}]`
+            const input = item.input
+            if (typeof input === 'string' && input) return `[🔧 工具调用]`
+            if (typeof input === 'object' && input !== null) return `[🔧 工具调用]`
+            return ''
+          }
+          if (t === 'tool_result') {
+            const name = String(item.name ?? '')
+            const resultContent = item.content
+            if (Array.isArray(resultContent)) {
+              const textParts = resultContent
+                .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
+                .map((r: any) => r.text)
+              if (textParts.length > 0) {
+                return `[🔧 ${name || '结果'}] ${textParts.join('\n').slice(0, 200)}`
+              }
+            }
+            if (typeof item.text === 'string' && item.text) return `[🔧 ${name || '结果'}] ${item.text}`
+            if (name) return `[🔧 ${name}]`
+            return `[🔧 工具结果]`
+          }
+          return ''
+        }).filter(s => s && s !== '[tool_code]')
+        return parts
+      }
+      return []
+    }
+
     // 过滤系统消息
     function isSystemMessage(content: string): boolean {
       return content.includes('巡检异常通知')
@@ -865,16 +916,17 @@ export const useAgentStore = defineStore('agent', () => {
             console.log(`[REC-085] agent=${agent.key} role="${role}" content 类型=${typeof msg.content}`, typeof msg.content === 'object' ? JSON.stringify(msg.content).slice(0, 200) : String(msg.content ?? '').slice(0, 100))
 
             // 显示所有角色的消息（包含 user、assistant、tool 等）
-            // 避免遗漏，全量显示；extractContent 内部会过滤无意义内容
+            // 每条消息的多个 content part 分别独立显示为单独气泡（不合并）
             if (role === 'user' || role === 'assistant' || role === 'agent' || role === 'tool') {
-              const content = extractContent(msg)
-              console.log(`[REC-085] 提取内容 长度=${content?.length ?? 0}`, content?.slice(0, 120))
-              if (content && !isSystemMessage(content)) {
-                console.log(`[REC-085] ✅ agent=${agent.key} 显示:`, content.slice(0, 150))
-                updateAgentBubble(agent.key, content)
-                found = true
-                break // 只显示最新一条
+              const parts = extractContentParts(msg)
+              for (const part of parts) {
+                if (part && !isSystemMessage(part)) {
+                  console.log(`[REC-085] ✅ agent=${agent.key} 显示 part:`, part.slice(0, 150))
+                  updateAgentBubble(agent.key, part)
+                  found = true
+                }
               }
+              if (found) break // 一条消息处理完就跳出（不跨消息循环）
             }
           }
 
@@ -891,14 +943,26 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /**
-   * 获取指定 Agent 的当前气泡消息
+   * 获取指定 Agent 的全部气泡消息数组
    */
-  function getAgentBubble(agentKey: string): string | null {
-    return messageBubbles.value[agentKey]?.content ?? null
+  function getAgentBubbles(agentKey: string): string[] {
+    const arr = messageBubbles.value[agentKey]
+    return arr ? arr.map(e => e.content) : []
   }
 
   /**
-   * 清除指定 Agent 的气泡
+   * 获取指定 Agent 的最新一条气泡内容（兼容旧调用方）
+   */
+  function getAgentBubble(agentKey: string): string | null {
+    const arr = messageBubbles.value[agentKey]
+    if (arr && arr.length > 0) {
+      return arr[arr.length - 1].content
+    }
+    return null
+  }
+
+  /**
+   * 清除指定 Agent 的所有气泡
    */
   function clearAgentBubble(agentKey: string): void {
     if (bubbleTimers[agentKey]) {
@@ -1016,6 +1080,7 @@ export const useAgentStore = defineStore('agent', () => {
     // REC-071: 消息气泡
     updateAgentBubble,
     getAgentBubble,
+    getAgentBubbles,
     clearAgentBubble,
   }
 })

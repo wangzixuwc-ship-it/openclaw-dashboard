@@ -31,6 +31,7 @@ export const useProjectStore = defineStore('project', () => {
   const statusCounts = computed(() => {
     const counts: Record<ProjectStatus, number> = {
       pending: 0,
+      running: 0,
       active: 0,
       paused: 0,
       completed: 0,
@@ -38,6 +39,9 @@ export const useProjectStore = defineStore('project', () => {
     }
     for (const p of projects.value) {
       counts[p.status] = (counts[p.status] || 0) + 1
+      // running 和 active 视为同义
+      if (p.status === 'active') counts.running = (counts.running || 0) + 1
+      if (p.status === 'running') counts.active = (counts.active || 0) + 1
     }
     return counts
   })
@@ -48,9 +52,9 @@ export const useProjectStore = defineStore('project', () => {
     loading.value = true
     error.value = null
     try {
-      const { projects, activeProjectId } = await fetchProjects()
-      projects.value = projects
-      if (activeProjectId) activeProjectId.value = activeProjectId
+      const result = await fetchProjects()
+      projects.value = result.projects
+      if (result.activeProjectId) activeProjectId.value = result.activeProjectId
     } catch (e: unknown) {
       error.value = (e as Error).message ?? '加载失败'
       console.error('[ProjectStore] loadProjects error:', e)
