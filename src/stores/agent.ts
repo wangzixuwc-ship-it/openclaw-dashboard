@@ -694,10 +694,10 @@ export const useAgentStore = defineStore('agent', () => {
         }
       }
 
-      // Step 2: 构建消息 — 文本 + 文件路径
+      // Step 2: 构建消息 — 文本 + Markdown 图片
       let fullMessage = text
       for (const fp of filePaths) {
-        fullMessage += `\n\n${fp}`
+        fullMessage += `\n\n![image](${window.location.origin}${fp})`
       }
 
       // Step 3: 发送消息
@@ -754,6 +754,8 @@ export const useAgentStore = defineStore('agent', () => {
       timestamp: Date.now(),
     }
     messageBubbles.value[agentKey].push(entry)
+    // REC-123: 强制触发 Vue 响应式（新增 key 时 ref 对象引用不变）
+    messageBubbles.value = { ...messageBubbles.value }
 
     // 单条定时自动消失
     setTimeout(() => {
@@ -762,6 +764,8 @@ export const useAgentStore = defineStore('agent', () => {
         const idx = arr.indexOf(entry)
         if (idx !== -1) arr.splice(idx, 1)
         if (arr.length === 0) delete messageBubbles.value[agentKey]
+        // REC-123: 强制触发 Vue 响应式
+        messageBubbles.value = { ...messageBubbles.value }
       }
     }, BUBBLE_DURATION)
   }

@@ -801,6 +801,143 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // Upload Image API — 图片上传
+  // ============================================
+
+  if (pathname === '/api/upload-image' && req.method === 'POST') {
+    // 5MB 大小限制（字节计数，避免超限后还全量加载）
+    const MAX_SIZE = 5 * 1024 * 1024
+    const chunks = []
+    let totalBytes = 0
+    let sizeExceeded = false
+
+    req.on('data', chunk => {
+      if (sizeExceeded) return // 已超限，丢弃后续 chunk
+      totalBytes += chunk.length
+      if (totalBytes > MAX_SIZE) {
+        sizeExceeded = true
+        req.destroy()
+      } else {
+        chunks.push(chunk)
+      }
+    })
+
+    req.on('end', async () => {
+      if (sizeExceeded) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: '图片大小超过 5MB 限制' }))
+        return
+      }
+
+      try {
+        const body = Buffer.concat(chunks).toString()
+        const { agentId, mediaType, data } = JSON.parse(body)
+
+        if (!data) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: '缺少 data 参数' }))
+          return
+        }
+
+        // 强制要求 mediaType 参数，缺失即拒绝
+        if (!mediaType) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: '缺少 mediaType 参数' }))
+          return
+        }
+
+        // 验证图片格式
+        const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp']
+        const extMap = {
+          'image/png': '.png',
+          'image/jpeg': '.jpg',
+          'image/jpg': '.jpg',
+          'image/gif': '.gif',
+          'image/webp': '.webp',
+        }
+
+        if (!allowedTypes.includes(mediaType)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: `不支持的图片格式: ${mediaType}` }))
+          return
+        }
+
+        const ext = extMap[mediaType] || '.png'
+
+        // 解码 base64
+        const base64Data = data.startsWith('data:')
+          ? data.split(',')[1]
+          : data
+        const buffer = Buffer.from(base64Data, 'base64')
+
+        // 存储路径：uploads 目录（按日期分文件夹）
+        const today = new Date().toISOString().slice(0, 10) // 2026-05-16
+        const uploadDir = path.join(__dirname, '..', 'data', 'uploads', today)
+        await fs.mkdir(uploadDir, { recursive: true })
+
+        const fileName = `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
+        const filePath = path.join(uploadDir, fileName)
+        await fs.writeFile(filePath, buffer)
+
+        // 返回相对路径，供前端访问
+        const relativePath = `/uploads/${today}/${fileName}`
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          filePath: relativePath,
+          url: `${relativePath}`
+        }))
+      } catch (error) {
+        console.error('[Upload] Error:', error.message)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: error.message }))
+      }
+    })
+    return
+  }
+
+  // ============================================
+  // Static file serving for uploads
+  // ============================================
+
+  if (pathname.startsWith('/uploads/')) {
+    try {
+      // P1 修复：路径遍历防护
+      const uploadsBase = path.resolve(path.join(__dirname, '..', 'data', 'uploads'))
+      // pathname 格式 /uploads/date/filename，去掉 /uploads/ 前缀
+      const relativePath = decodeURIComponent(pathname.slice('/uploads/'.length))
+      const filePath = path.resolve(uploadsBase, relativePath)
+
+      // 校验解析后的路径必须在 uploads 目录下
+      if (!filePath.startsWith(uploadsBase + path.sep)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Access denied' }))
+        return
+      }
+
+      const content = await fs.readFile(filePath)
+
+      const ext = path.extname(filePath).toLowerCase()
+      const contentTypeMap = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+      }
+      const contentType = contentTypeMap[ext] || 'application/octet-stream'
+
+      res.writeHead(200, { 'Content-Type': contentType })
+      res.end(content)
+    } catch (error) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'File not found' }))
+    }
+    return
+  }
+
+  // ============================================
   // Projects API — 项目管理
   // ============================================
 
@@ -1233,6 +1370,7 @@ server.listen(PORT, () => {
   console.log('  GET  /api/usage              - 获取用量统计')
   console.log('  GET  /api/health             - 健康检查')
   console.log('  POST /reset                  - 重置 Agent')
+  console.log('  POST /api/upload-image       - 图片上传 (base64, ≤5MB)')
   console.log('')
   console.log('[项目管理 API]')
   console.log('  GET    /api/projects              - 获取所有项目列表')

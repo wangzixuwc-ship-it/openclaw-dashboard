@@ -32,3 +32,4 @@ docs
 test-sandbox
 start-init.bat
 start-init.sh
+data/*

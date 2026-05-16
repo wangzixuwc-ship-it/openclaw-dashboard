@@ -677,11 +677,16 @@ async function loadHistory(silent: boolean = false, scrollToEnd: boolean = true)
       loadingHistory.value = false
     }
   }
+  await nextTick()
+
   if (scrollToEnd) {
-    // 仅当需要保持底部时才滚动
-    await nextTick()
-    scrollToBottom()
+    // 用户主动触发的加载（初始打开、手动刷新）始终滚动到底部；
+    // 静默刷新（定时器）仅在用户已在底部时才保持底部，避免打扰用户阅读历史消息
+    if (!silent || isScrolledToBottom()) {
+      scrollToBottom()
+    }
   }
+
 }
 
 /** 滚动到最后一条消息 */
@@ -775,6 +780,8 @@ async function sendMessage(): Promise<void> {
 }
 
 // 新消息到达时仅在已处于底部的情况下自动滚动到底部
+// 使用 flush: 'pre'（默认）：在 DOM 更新前同步触发，此时 isScrolledToBottom()
+// 读到的是用户实时的 scrollTop（不会因新消息导致 scrollHeight 变化而误判）
 watch(recentMessages, () => {
   if (isScrolledToBottom()) {
     nextTick(() => scrollToBottom())
@@ -934,6 +941,7 @@ watch(drawerVisible, (val) => {
   flex-direction: column;
   overflow-y: auto;
   min-height: 0;
+  overflow-anchor: none; /* 禁用浏览器 scroll anchoring，防止 DOM 重渲染时自动滚动 */
 }
 
 /* ── 消息 Card：纯视觉容器，不管 overflow ── */

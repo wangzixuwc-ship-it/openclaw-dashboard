@@ -212,6 +212,15 @@ body {
   background-color: var(--bg-elevated) !important;
   border-color: var(--border-color) !important;
   color: var(--text-primary) !important;
+  z-index: 5000 !important;
+}
+
+.el-message-box {
+  z-index: 5000 !important;
+}
+
+.el-overlay {
+  z-index: 4500 !important;
 }
 
 .el-notification {

@@ -1,7 +1,7 @@
 <template>
   <el-popover
-    v-if="latestMessage"
-    :key="latestMessage"
+    v-if="hasBubbles"
+    :key="latestMessages?.length"
     placement="right"
     width="400px"
     :offset="12"
@@ -9,7 +9,14 @@
     :visible="bubbleVisible"
     class="bubble-popover"
   >
-    <div class="markdown-body markdown-bubble" :style="{ maxHeight: '160px', overflowY: 'auto' }" v-html="renderedMessage"></div>
+    <div class="bubble-list" :style="{ maxHeight: '95vh', overflowY: 'auto' }">
+      <div
+        v-for="(msg, idx) in latestMessages"
+        :key="idx"
+        class="markdown-body markdown-bubble-item"
+        v-html="renderMessage(msg)"
+      ></div>
+    </div>
 
     <template #reference>
       <el-card
@@ -198,7 +205,7 @@ import {
 
 const props = defineProps<{
   agent: AgentInfo
-  latestMessage?: string
+  latestMessages?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -260,19 +267,23 @@ const shortModelName = computed(() => {
   return MODEL_SHORT[m] || m.split('/').pop() || m
 })
 
-const renderedMessage = computed(() => {
-  if (!props.latestMessage) return ''
-  const html = marked.parse(props.latestMessage) as string
+// 渲染消息 Markdown（兼容上游 renderMessage 函数式写法）
+function renderMessage(text: string): string {
+  if (!text) return ''
+  const html = marked.parse(text) as string
   return DOMPurify.sanitize(html)
-})
+}
+
+const renderedMessage = computed(() => renderMessage(props.latestMessage || ''))
 
 // el-popover 可见性控制
-// REC-080: 完全依赖 store 的 messageBubbles 状态（BUBBLE_DURATION = 10s）
-const bubbleVisible = ref(!!props.latestMessage)
+// REC-080: 完全依赖 store 的 messageBubbles 状态（BUBBLE_DURATION = 20s）
+const hasBubbles = computed(() => !!(props.latestMessages && props.latestMessages.length > 0))
+const bubbleVisible = ref(hasBubbles.value)
 const cardRef = ref<HTMLElement>()
 
-watch(() => props.latestMessage, (newVal) => {
-  bubbleVisible.value = !!newVal
+watch(() => props.latestMessages, (newVal) => {
+  bubbleVisible.value = !!(newVal && newVal.length > 0)
 }, { immediate: true })
 
 const statusTagType = computed(() => {
@@ -379,6 +390,17 @@ function openDrawer(): void {
 </script>
 
 <style scoped>
+/* ==================== Bubble List ==================== */
+.bubble-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.markdown-bubble-item {
+  animation: bubbleSlideIn 0.3s ease-out;
+}
+
 /* ==================== Card ==================== */
 .agent-card {
   cursor: pointer;
