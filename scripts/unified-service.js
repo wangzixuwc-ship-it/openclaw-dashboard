@@ -39,47 +39,94 @@ const openclawVersion = process.env.VITE_OPENCLAW_VERSION || 'unknown'
 // ============================================
 
 /**
- * 解析 .jsonl 文件，累加 token 用量（含按模型分组）
+ * 从 .usage-cost-cache.json 读取某个 agent 的预计算用量
+ * 返回 { sessionUuids: Set<string>, totals: { tokens, cost } }
+ */
+async function readUsageCache(agentSessionsDir) {
+  const cachePath = path.join(agentSessionsDir, '.usage-cost-cache.json')
+  try {
+    const content = await fs.readFile(cachePath, 'utf-8')
+    const data = JSON.parse(content)
+    if (!data?.files) return { sessionUuids: new Set(), totals: { tokens: 0, cost: 0 } }
+
+    const sessionUuids = new Set()
+    let tokens = 0
+    let cost = 0
+
+    for (const [filePath, entry] of Object.entries(data.files)) {
+      if (entry?.totals) {
+        tokens += entry.totals.totalTokens || 0
+        cost += entry.totals.totalCost || 0
+      }
+      // 从绝对路径中提取 UUID（兼容 .jsonl.deleted.* 等变体）
+      const basename = path.basename(filePath)
+      const uuid = extractSessionUuid(basename)
+      if (uuid) sessionUuids.add(uuid)
+    }
+
+    return { sessionUuids, totals: { tokens, cost } }
+  } catch (e) {
+    return { sessionUuids: new Set(), totals: { tokens: 0, cost: 0 } }
+  }
+}
+
+/**
+ * 从文件名中提取 session UUID
+ * 格式: "uuid.jsonl", "uuid.jsonl.reset.TIMESTAMP", "uuid.jsonl.deleted.TIMESTAMP" 等
+ */
+function extractSessionUuid(filename) {
+  // 匹配 .jsonl 前的 UUID 部分
+  const match = filename.match(/^([a-f0-9-]+)\.jsonl/)
+  return match ? match[1] : null
+}
+
+/**
+ * 解析单个 .jsonl 文件，取最后一条累计值作为该 session 的总用量（含按模型分组）
+ * .jsonl 中每行的 message.usage.totalTokens 是会话累计值，
+ * 取最后（最大）一条即可得到该 session 的总 token 数。
  */
 async function parseJsonlFile(filePath) {
   try {
     const content = await fs.readFile(filePath, 'utf-8')
     const lines = content.split('\n').filter(line => line.trim())
 
-    let totalTokens = 0
-    let totalCost = 0
-    const byModel = {}  // model -> { tokens, cost }
+    let sessionTotalTokens = 0
+    let sessionTotalCost = 0
+    const byModel = {}  // model -> { tokens, cost }（各模型的最后累计值）
 
     for (const line of lines) {
       try {
         const entry = JSON.parse(line)
-
         if (entry.message?.usage) {
           const usage = entry.message.usage
           const model = (entry.message.model || 'unknown').trim()
-          const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) || 0
-          const cost = usage.cost?.total || 0
 
-          totalTokens += tokens
-          totalCost += cost
+          // totalTokens 是累计值 — 取最大（最后）一条
+          if (usage.totalTokens && usage.totalTokens > sessionTotalTokens) {
+            sessionTotalTokens = usage.totalTokens
+          }
+          // cost.total 也是累计值 — 取最后一条
+          if (usage.cost?.total) {
+            sessionTotalCost = usage.cost.total
+          }
 
-          if (tokens > 0) {
+          // 按模型记录（保留每个模型的最新/最大累计值）
+          if (model && usage.totalTokens) {
             if (!byModel[model]) byModel[model] = { tokens: 0, cost: 0 }
-            byModel[model].tokens += tokens
-            byModel[model].cost += cost
+            if (usage.totalTokens > byModel[model].tokens) {
+              byModel[model].tokens = usage.totalTokens
+            }
+            if (usage.cost?.total) {
+              byModel[model].cost = usage.cost.total
+            }
           }
         }
-
-        if (entry.responseUsage?.totalTokens) {
-          totalTokens += entry.responseUsage.totalTokens
-        }
-
       } catch (e) {
-        // 忽略解析错误
+        // 忽略单行解析错误
       }
     }
 
-    return { totalTokens, totalCost, byModel }
+    return { totalTokens: sessionTotalTokens, totalCost: sessionTotalCost, byModel }
   } catch (e) {
     console.error(`Error reading ${filePath}:`, e.message)
     return { totalTokens: 0, totalCost: 0, byModel: {} }
@@ -87,7 +134,27 @@ async function parseJsonlFile(filePath) {
 }
 
 /**
- * 读取所有 agent 的所有 session 文件
+ * 判断文件名是否为可解析的 session 文件
+ * 包含所有状态：活跃(.jsonl)、已重置(.jsonl.reset.*)、已删除(.jsonl.deleted.*)
+ */
+function isSessionFile(filename) {
+  if (filename.startsWith('.')) return false
+  if (filename.endsWith('.trajectory.jsonl')) return false
+  if (filename.endsWith('.trajectory-path.json')) return false
+  if (filename.includes('.bak-')) return false
+  if (filename.endsWith('.tmp')) return false
+  if (filename === 'sessions.json') return false
+  if (filename.endsWith('.lock')) return false
+  // 包含所有 .jsonl 变体
+  return filename.includes('.jsonl') && !filename.startsWith('.usage-cost-cache')
+}
+
+/**
+ * 读取所有 agent 的所有 session 用量
+ * 数据来源优先级：
+ *   1. .usage-cost-cache.json（OpenClaw 预计算，每行 input/output 非累计）
+ *   2. 不在缓存中的 .jsonl 文件（新近会话，取最后一条累计值）
+ * 包含 .jsonl.deleted.* 文件，确保清空会话后总量不减少
  */
 async function collectUsageStats() {
   const now = Date.now()
@@ -109,30 +176,97 @@ async function collectUsageStats() {
 
       try {
         await fs.access(agentSessionsDir)
-        const files = await fs.readdir(agentSessionsDir)
-        const jsonlFiles = files.filter(f => {
-          if (f.startsWith('.')) return false
-          if (f.endsWith('.trajectory.jsonl')) return false
-          if (f.endsWith('.trajectory-path.json')) return false
-          if (f.includes('.deleted.')) return false
-          if (f.includes('.bak-')) return false
-          if (f.endsWith('.tmp')) return false
-          if (f.startsWith('.usage-cost-cache')) return false
-          if (f === 'sessions.json') return false
-          return f.endsWith('.jsonl') || f.endsWith('.jsonl.reset') || f.endsWith('.jsonl.reset.bak')
-        })
+      } catch (e) {
+        continue // 跳过无 sessions 目录的 agent
+      }
 
-        let agentTokens = 0
-        let agentCost = 0
+      // Step 1: 从 usage-cache 获取预计算数据（按 uuid 索引）
+      const cache = await readUsageCache(agentSessionsDir)
+      const cachedUuids = cache.sessionUuids
 
-        for (const file of jsonlFiles) {
-          const filePath = path.join(agentSessionsDir, file)
-          const result = await parseJsonlFile(filePath)
+      // 构建 uuid → { tokens, cost } 映射，用于替换活跃文件的缓存值
+      const cacheByUuid = new Map()
+      const cachePath = path.join(agentSessionsDir, '.usage-cost-cache.json')
+      try {
+        const cacheContent = await fs.readFile(cachePath, 'utf-8')
+        const cacheData = JSON.parse(cacheContent)
+        if (cacheData?.files) {
+          for (const [filePath, entry] of Object.entries(cacheData.files)) {
+            if (entry?.totals) {
+              const basename = path.basename(filePath)
+              const uuid = extractSessionUuid(basename)
+              if (uuid) {
+                cacheByUuid.set(uuid, {
+                  tokens: entry.totals.totalTokens || 0,
+                  cost: entry.totals.totalCost || 0
+                })
+              }
+            }
+          }
+        }
+      } catch (e) { /* 已经通过 readUsageCache 处理了 */ }
+
+      // Step 2: 扫描文件系统，每个 uuid 只计一次
+      // 优先级：活跃 .jsonl 文件 > 缓存 > 归档文件解析
+      const files = await fs.readdir(agentSessionsDir)
+      const sessionFiles = files.filter(isSessionFile)
+
+      // 收集所有文件的 uuid 和类型
+      const fileEntries = sessionFiles.map(file => ({
+        file,
+        uuid: extractSessionUuid(file),
+        isActive: file.endsWith('.jsonl') &&
+          !file.includes('.reset') &&
+          !file.includes('.deleted') &&
+          !file.includes('.bak') &&
+          !file.includes('.lock')
+      })).filter(e => e.uuid)
+
+      // 去重：活跃文件优先，同一个 uuid 只保留一个
+      const seenUuids = new Set()
+      const filesToParse = []
+
+      // 先处理活跃文件（优先级最高）
+      for (const entry of fileEntries) {
+        if (entry.isActive && !seenUuids.has(entry.uuid)) {
+          seenUuids.add(entry.uuid)
+          filesToParse.push(entry)
+        }
+      }
+      // 再处理非活跃文件（uuid 未被活跃文件占用）
+      for (const entry of fileEntries) {
+        if (!entry.isActive && !seenUuids.has(entry.uuid)) {
+          seenUuids.add(entry.uuid)
+          filesToParse.push(entry)
+        }
+      }
+
+      let agentTokens = 0
+      let agentCost = 0
+      let sessionCount = 0
+
+      for (const { file, uuid } of filesToParse) {
+        // 缓存优先（包含 cacheRead 等全部历史数据，不受文件截断影响）
+        const cacheEntry = cacheByUuid.get(uuid)
+
+        if (cacheEntry) {
+          agentTokens += cacheEntry.tokens
+          agentCost += cacheEntry.cost
+          sessionCount++
+          continue
+        }
+
+        // 缓存中没有的 → 实时解析 .jsonl 作为后备
+        const filePath = path.join(agentSessionsDir, file)
+        const result = await parseJsonlFile(filePath)
+        if (result.totalTokens > 0 || result.totalCost > 0) {
           agentTokens += result.totalTokens
           agentCost += result.totalCost
 
+          sessionCount++
+
           // 聚合按模型数据
-          for (const [model, data] of Object.entries(result.byModel)) {
+          for (const [model, data] of Object.entries(result.byModel || {})) {
             if (!byModel[model]) byModel[model] = { tokens: 0, cost: 0 }
             byModel[model].tokens += data.tokens
             byModel[model].cost += data.cost
@@ -143,19 +277,21 @@ async function collectUsageStats() {
             byAgentByModel[agent][model].cost += data.cost
           }
         }
+      }
 
-        if (agentTokens > 0 || agentCost > 0) {
-          byAgent[agent] = {
-            tokens: agentTokens,
-            cost: agentCost,
-            sessionCount: jsonlFiles.length
-          }
-          totalTokens += agentTokens
-          totalCost += agentCost
+      // 缓存中有但文件系统已完全删除的 session → 计入
+      for (const [uuid, entry] of cacheByUuid) {
+        if (!seenUuids.has(uuid)) {
+          agentTokens += entry.tokens
+          agentCost += entry.cost
+          if (entry.tokens > 0 || entry.cost > 0) sessionCount++
         }
+      }
 
-      } catch (e) {
-        // 忽略不存在的目录
+      if (agentTokens > 0 || agentCost > 0) {
+        byAgent[agent] = { tokens: agentTokens, cost: agentCost, sessionCount }
+        totalTokens += agentTokens
+        totalCost += agentCost
       }
     }
 

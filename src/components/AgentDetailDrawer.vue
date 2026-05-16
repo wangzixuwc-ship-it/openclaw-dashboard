@@ -7,6 +7,7 @@
     :close-on-click-modal="true"
     destroy-on-close
     :z-index="3000"
+    @opened="onDrawerOpened"
   >
     <template #header>
       <div class="drawer-title">
@@ -28,7 +29,7 @@
       <div class="drawer-body">
         <!-- ========= 左侧：消息区域 ========= -->
         <div class="drawer-left">
-          <div ref="msgContainerRef" class="left-scroll-wrap">
+          <div ref="msgContainerRef" class="left-scroll-wrap" @scroll="handleScroll">
             <el-card class="detail-section msg-section" shadow="never">
               <template #header>
                 <div class="section-header">
@@ -234,7 +235,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, type Component } from 'vue'
+import { ref, computed, watch, onUnmounted, nextTick, type Component } from 'vue'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
@@ -315,6 +316,9 @@ interface ImageAttachment {
 }
 const imageAttachments = ref<ImageAttachment[]>([])
 const previewImageUrl = ref('') // 图片预览弹窗
+
+// 自动滚动到底部（默认开启，手动上滚暂停）
+const autoScrollToBottom = ref(true)
 
 // Computed
 const displayStatus = computed(() => {
@@ -618,18 +622,12 @@ function splitContentParts(content: unknown): { contentType: string; content: st
 }
 
 // Actions
-/** 判断滚动条是否在底部附近 */
-function isScrolledToBottom(): boolean {
-  const el = msgContainerRef.value
-  if (!el) return true
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 40
-}
-
-async function loadHistory(silent: boolean = false, scrollToEnd: boolean = true): Promise<void> {
+async function loadHistory(silent: boolean = false, forceScrollBottom = false): Promise<void> {
   if (!agent.value?.key) return
   const startedAt = Date.now()
   const MIN_LOADING_MS = 500 // 手动加载时 loading 至少显示 500ms，确保用户能感知到反馈
   if (!silent) loadingHistory.value = true
+
   try {
     const history = await store.fetchSessionHistory(agent.value.key)
     historyCount.value = history.length
@@ -666,7 +664,13 @@ async function loadHistory(silent: boolean = false, scrollToEnd: boolean = true)
 
     // 过滤清洗后为空的
     const cleanMessages = normalized.filter((msg) => msg.content.length > 0)
+
     recentMessages.value = cleanMessages
+
+    // 强制滚动到底部（首次打开时）
+    if (forceScrollBottom) {
+      scrollToBottom()
+    }
   } finally {
     if (!silent) {
       const elapsed = Date.now() - startedAt
@@ -676,29 +680,6 @@ async function loadHistory(silent: boolean = false, scrollToEnd: boolean = true)
       }
       loadingHistory.value = false
     }
-  }
-  await nextTick()
-
-  if (scrollToEnd) {
-    // 用户主动触发的加载（初始打开、手动刷新）始终滚动到底部；
-    // 静默刷新（定时器）仅在用户已在底部时才保持底部，避免打扰用户阅读历史消息
-    if (!silent || isScrolledToBottom()) {
-      scrollToBottom()
-    }
-  }
-
-}
-
-/** 滚动到最后一条消息 */
-function scrollToBottom(): void {
-  const container = msgContainerRef.value
-  if (!container) return
-  // 找到最后一条消息气泡，用 scrollIntoView 精确滚动到底部
-  const lastRow = container.querySelector('.chat-row:last-child') as HTMLElement | null
-  if (lastRow) {
-    lastRow.scrollIntoView({ block: 'end', behavior: 'instant' })
-  } else {
-    container.scrollTop = container.scrollHeight
   }
 }
 
@@ -778,15 +759,6 @@ async function sendMessage(): Promise<void> {
     sending.value = false
   }
 }
-
-// 新消息到达时仅在已处于底部的情况下自动滚动到底部
-// 使用 flush: 'pre'（默认）：在 DOM 更新前同步触发，此时 isScrolledToBottom()
-// 读到的是用户实时的 scrollTop（不会因新消息导致 scrollHeight 变化而误判）
-watch(recentMessages, () => {
-  if (isScrolledToBottom()) {
-    nextTick(() => scrollToBottom())
-  }
-}, { deep: false })
 
 async function refreshStatus(): Promise<void> {
   if (!agent.value?.key) return
@@ -871,24 +843,61 @@ async function handleResetSession(): Promise<void> {
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  if (refreshTimer !== null) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+})
+
+// 滚动辅助函数
+function scrollToBottom(): void {
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = msgContainerRef.value
+        if (el) el.scrollTop = el.scrollHeight
+      })
+    })
+  })
+}
+
+// 处理滚动事件：判断用户是否在底部 60px 内恢复自动跟随
+function handleScroll(): void {
+  const el = msgContainerRef.value
+  if (!el) return
+  const threshold = 60
+  autoScrollToBottom.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold
+}
+
+// Drawer @opened 事件：首次打开时加载历史并滚动到底部
+async function onDrawerOpened(): Promise<void> {
+  if (agent.value) {
+    await loadHistory(false, true)
+  }
+}
+
 // Watch for drawer open
 watch(drawerVisible, (val) => {
   if (val && agent.value) {
-    // Load history on open
-    loadHistory()
-    // 抽屉打开期间定时刷新消息
     refreshTimer = setInterval(() => {
       if (drawerVisible.value && agent.value) {
-        const wasAtBottom = isScrolledToBottom()
-        loadHistory(true, wasAtBottom) // 静默刷新，不显示 loading，仅在已在底部时保持底部
+        loadHistory(true)
       }
     }, 3000)
   } else if (!val) {
-    // 关闭抽屉时停止刷新
     if (refreshTimer !== null) {
       clearInterval(refreshTimer)
       refreshTimer = null
     }
+  }
+})
+
+// 新消息到达时自动滚动（autoScrollToBottom=true 时）
+watch(recentMessages, () => {
+  if (autoScrollToBottom.value) {
+    scrollToBottom()
   }
 })
 </script>
@@ -952,6 +961,7 @@ watch(drawerVisible, (val) => {
 .drawer-left .msg-section :deep(.el-card) {
   display: flex;
   flex-direction: column;
+  overflow: visible; /* 覆盖 el-card 默认 overflow:hidden，确保消息内容不备剪裁，.left-scroll-wrap 能正确计算滚动高度 */
 }
 
 .drawer-left .msg-section :deep(.el-card__body) {
@@ -1294,10 +1304,8 @@ watch(drawerVisible, (val) => {
   border-radius: 50%;
 }
 
-/* 左面板滚动平滑 */
-.left-scroll-wrap {
-  scroll-behavior: smooth;
-}
+/* 左面板滚动平滑 — 被上面 auto 规则覆盖，参考保留 */
+/* scroll-behavior: smooth; 与 JS scrollTop 赋值冲突，改为 auto 确保即时滚动 */
 </style>
 
 <!-- 非 scoped：v-html 渲染的 markdown 内容不受 scoped 限制 -->

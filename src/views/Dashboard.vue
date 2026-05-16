@@ -10,11 +10,7 @@
         </div>
 
         <div class="status-indicators">
-          <!-- 视图切换 (REC-067) -->
-          <!-- <el-radio-group v-model="activeView" size="small" class="view-switcher">
-            <el-radio-button value="agent">Agent 看板</el-radio-button>
-            <el-radio-button value="project">项目监控</el-radio-button>
-          </el-radio-group> -->
+          <!-- 视图切换 (removed REC-067: project monitor removed) -->
 
           <!-- Gateway Version -->
           <div class="indicator indicator-version">
@@ -56,9 +52,8 @@
       </div>
     </header>
 
-    <!-- ========= 2. 统计区（Agent 看板时显示）========= -->
-    <Transition name="view-fade">
-      <section v-if="activeView === 'agent'" class="stats-section">
+    <!-- ========= 2. 统计区 ========= -->
+    <section class="stats-section">
         <div class="stats-inner">
           <el-card
             v-for="stat in statsCards"
@@ -83,10 +78,35 @@
           </el-card>
         </div>
       </section>
-    </Transition>
 
-    <!-- ========= 3. 看板主体（5列：空闲/运行中/已终止/错误/未知） ========= -->
-    <main class="board-container" v-if="activeView === 'agent'">
+    <!-- ========= 3. 工作流进度步进条 / 分割线 ========= -->
+    <div class="workflow-section">
+      <div v-if="workflowData.activeStep >= 0 && workflowData.steps.length > 0" class="workflow-steps-wrapper">
+        <el-card shadow="hover" class="workflow-card">
+          <div class="workflow-steps-simple">
+            <template v-for="(step, idx) in workflowData.steps" :key="idx">
+              <div class="workflow-step-simple-item" :class="{ 'is-active': idx === workflowData.activeStep }">
+                <span class="simple-step-circle" :class="getSimpleStepClass(idx)"></span>
+                <span class="simple-step-title">{{ step.title }}</span>
+              </div>
+              <div
+                v-if="idx < workflowData.steps.length - 1"
+                class="step-arrow-group"
+                :class="getArrowState(idx)"
+              >
+                <el-icon class="step-arrow-chevron" :style="{ animationDelay: '0ms' }"><ArrowRight /></el-icon>
+                <el-icon class="step-arrow-chevron" :style="{ animationDelay: '200ms' }"><ArrowRight /></el-icon>
+                <el-icon class="step-arrow-chevron" :style="{ animationDelay: '400ms' }"><ArrowRight /></el-icon>
+              </div>
+            </template>
+          </div>
+        </el-card>
+      </div>
+      <div v-else class="workflow-divider-line" />
+    </div>
+
+    <!-- ========= 4. 看板主体（5列：空闲/运行中/已终止/错误/未知） ========= -->
+    <main class="board-container">
       <!-- 空闲列 -->
       <div class="board-column board-column-idle">
         <div class="board-column-header" style="border-bottom-color: #f59e0b;">
@@ -203,11 +223,6 @@
       </div>
     </main>
 
-    <!-- 项目监控视图 (REC-067) -->
-    <Transition name="view-fade">
-      <ProjectMonitor v-if="activeView === 'project'" />
-    </Transition>
-
     <!-- Agent Detail Drawer -->
     <AgentDetailDrawer
       v-model:visible="drawerVisible"
@@ -220,13 +235,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAgentStore, type AgentInfo } from '../stores/agent'
-import { useProjectStore } from '../stores/project'
 import AgentCard from '../components/AgentCard.vue'
 import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
 import TokenDetailDialog from '../components/TokenDetailDialog.vue'
 import ProjectMonitor from './ProjectMonitor.vue'
+import { type WorkflowData } from '../data/workflow-steps'
 import {
   Monitor,
   Refresh,
@@ -237,19 +252,11 @@ import {
   VideoPause,
   CircleClose,
   Money,
+  ArrowRight,
+  QuestionFilled,
 } from '@element-plus/icons-vue'
 
 const store = useAgentStore()
-const projectStore = useProjectStore()
-
-// 视图切换 (REC-067)
-const STORAGE_KEY = 'openclaw_dashboard_active_view'
-const activeView = ref<'agent' | 'project'>(
-  (localStorage.getItem(STORAGE_KEY) as 'agent' | 'project') ?? 'agent',
-)
-watch(activeView, (val) => {
-  localStorage.setItem(STORAGE_KEY, val)
-})
 
 // Real-time clock in status bar (updates every minute)
 const currentTime = ref('')
@@ -263,6 +270,38 @@ function updateClock(): void {
   const h = String(now.getHours()).padStart(2, '0')
   const m = String(now.getMinutes()).padStart(2, '0')
   currentTime.value = `${Y}年${M}月${D}日 ${h}:${m}`
+}
+
+// Workflow steps data (REC-117: 从文件轮询获取)
+const workflowData = ref<WorkflowData>({ activeStep: -1, steps: [] })
+let workflowTimer: ReturnType<typeof setInterval> | null = null
+
+async function fetchWorkflowData(): Promise<void> {
+  try {
+    const res = await fetch('/workflow-progress.json?t=' + Date.now())
+    if (res.ok) {
+      const data: WorkflowData = await res.json()
+      workflowData.value = data
+    }
+  } catch {
+    // 文件不存在或解析失败，保持当前值
+  }
+}
+
+/** 根据步骤索引返回圆点状态 class (Element Plus Simple 风格) */
+function getSimpleStepClass(idx: number): string {
+  const active = workflowData.value.activeStep
+  if (idx < active) return 'simple-step-finished'
+  if (idx === active) return 'simple-step-process'
+  return 'simple-step-waiting'
+}
+
+/** 根据步骤索引返回箭头组的状态 class */
+function getArrowState(idx: number): string {
+  const active = workflowData.value.activeStep
+  if (idx < active) return 'arrow-finished'   // 已完成节点后的箭头
+  if (idx === active) return 'arrow-process'  // 正在执行节点后的箭头
+  return 'arrow-waiting'                      // 未完成节点后的箭头
 }
 
 // Drawer
@@ -380,22 +419,28 @@ function onAgentDetail(agent: AgentInfo): void {
 }
 
 async function refreshAll(): Promise<void> {
-  await Promise.all([store.fetchAgents(), store.fetchHealth(), projectStore.loadProjects()])
+  await Promise.all([store.fetchAgents(), store.fetchHealth()])
 }
 
 onMounted(() => {
   refreshAll()
   store.subscribeAgents()
-  projectStore.loadProjects()
   // Start real-time clock
   updateClock()
   clockTimer = setInterval(updateClock, 60 * 1000) // update every minute
+  // REC-117: 工作流进度持久化 — 每 5 秒轮询
+  fetchWorkflowData()
+  workflowTimer = setInterval(fetchWorkflowData, 5000)
 })
 
 onUnmounted(() => {
   if (clockTimer) {
     clearInterval(clockTimer)
     clockTimer = null
+  }
+  if (workflowTimer) {
+    clearInterval(workflowTimer)
+    workflowTimer = null
   }
 })
 </script>
@@ -534,38 +579,9 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-/* ==================== VIEW SWITCHER (REC-067) ==================== */
-.view-switcher {
-  margin-right: 8px;
-}
-
-.view-switcher :deep(.el-radio-button__inner) {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--border-color);
-  color: var(--text-secondary);
-  font-size: 12px;
-  padding: 4px 14px;
-}
-
-.view-switcher :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
-  background: rgba(66, 165, 245, 0.2);
-  border-color: #42a5f5;
-  color: #42a5f5;
-  box-shadow: none;
-}
-
-.view-switcher :deep(.el-radio-button:first-child .el-radio-button__inner) {
-  border-radius: 16px 0 0 16px;
-}
-
-.view-switcher :deep(.el-radio-button:last-child .el-radio-button__inner) {
-  border-radius: 0 16px 16px 0;
-}
-
 /* ==================== STATS SECTION ==================== */
 .stats-section {
   background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-color);
 }
 
 .stats-inner {
@@ -659,6 +675,155 @@ onUnmounted(() => {
 .stat-running { border-left: 3px solid #4caf50; }
 .stat-idle { border-left: 3px solid #ffc107; }
 .stat-error { border-left: 3px solid #f44336; }
+
+/* ==================== WORKFLOW STEPS / DIVIDER ==================== */
+.workflow-section {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.workflow-steps-wrapper {
+  padding: 8px 0;
+}
+
+.workflow-card {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  transition: all 0.3s;
+}
+
+.workflow-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px var(--accent-glow);
+}
+
+.workflow-card :deep(.el-card__body) {
+  padding: 8px 16px;
+}
+
+/* 自定义步进条布局 (模仿 Element Plus Simple) */
+.workflow-steps-simple {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.workflow-step-simple-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.workflow-step-simple-item.is-active .simple-step-title {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 圆点指示器 (Element Plus Simple 风格) */
+.simple-step-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: all 0.3s;
+}
+
+.simple-step-finished {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.simple-step-process {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.simple-step-waiting {
+  background: transparent;
+  border-color: var(--text-secondary);
+  color: var(--text-secondary);
+}
+
+/* 步骤标题 */
+.simple-step-title {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  transition: color 0.3s;
+}
+
+.workflow-step-simple-item.is-active .simple-step-title,
+.simple-step-finished + .simple-step-title {
+  color: var(--accent);
+}
+
+/* ==================== 箭头分隔符 ==================== */
+.step-arrow-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 8px;
+  flex-shrink: 0;
+}
+
+.step-arrow-chevron {
+  width: 12px;
+  height: 12px;
+  transition: color 0.3s, opacity 0.3s;
+}
+
+/* 已完成节点后的箭头 → 高亮，无动画 */
+.step-arrow-group.arrow-finished .step-arrow-chevron {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* 正在执行节点后的箭头 → 波浪流水动画 */
+.step-arrow-group.arrow-process .step-arrow-chevron {
+  color: var(--accent);
+  opacity: 0.5;
+  animation: arrowWaveFlow 1s ease-in-out infinite;
+}
+
+/* 未完成节点后的箭头 → 灰色，无动画 */
+.step-arrow-group.arrow-waiting .step-arrow-chevron {
+  color: var(--text-secondary);
+  opacity: 0.3;
+}
+
+@keyframes arrowWaveFlow {
+  0%, 100% {
+    opacity: 0.3;
+    transform: translateX(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(4px);
+  }
+}
+
+.workflow-divider-line {
+  height: 1px;
+  background: var(--border-color);
+  border-radius: 1px;
+}
 
 /* ==================== BOARD LAYOUT ==================== */
 .board-container {
