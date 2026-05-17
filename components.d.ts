@@ -15,6 +15,7 @@ declare module 'vue' {
     AgentDetailDrawer: typeof import('./src/components/AgentDetailDrawer.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCard: typeof import('element-plus/es')['ElCard']
+    ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDrawer: typeof import('element-plus/es')['ElDrawer']
     ElEmpty: typeof import('element-plus/es')['ElEmpty']
     ElIcon: typeof import('element-plus/es')['ElIcon']
@@ -35,6 +36,7 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     TaskQueue: typeof import('./src/components/TaskQueue.vue')['default']
     TokenDetailDialog: typeof import('./src/components/TokenDetailDialog.vue')['default']
+    VersionDialog: typeof import('./src/components/VersionDialog.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

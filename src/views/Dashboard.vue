@@ -16,7 +16,7 @@
           <!-- 视图切换 (removed REC-067: project monitor removed) -->
 
           <!-- Gateway Version -->
-          <div class="indicator indicator-version">
+          <div class="indicator indicator-version" @click="versionDialogVisible = true" style="cursor: pointer;">
             <span class="indicator-label">OpenClaw</span>
             <span class="indicator-value">{{ store.gatewayVersion || '未知' }}</span>
           </div>
@@ -234,6 +234,9 @@
 
     <!-- Token 消耗详情弹窗 -->
     <TokenDetailDialog v-model:visible="tokenDetailVisible" />
+
+    <!-- Version Dialog (REC-068) -->
+    <VersionDialog v-model:visible="versionDialogVisible" :current-version="store.gatewayVersion || ''" />
   </div>
 </template>
 
@@ -243,7 +246,7 @@ import { useAgentStore, type AgentInfo } from '../stores/agent'
 import AgentCard from '../components/AgentCard.vue'
 import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
 import TokenDetailDialog from '../components/TokenDetailDialog.vue'
-import ProjectMonitor from './ProjectMonitor.vue'
+import VersionDialog from '../components/VersionDialog.vue'
 import { type WorkflowData } from '../data/workflow-steps'
 import {
   Monitor,
@@ -316,6 +319,9 @@ const selectedAgent = ref<AgentInfo | null>(null)
 
 // Token 详情弹窗
 const tokenDetailVisible = ref(false)
+
+// Version dialog
+const versionDialogVisible = ref(false)
 
 // Stats cards
 const statsCards = computed(() => [

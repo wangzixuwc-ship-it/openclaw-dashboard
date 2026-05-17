@@ -86,6 +86,38 @@ body {
   color: var(--text-primary) !important;
 }
 
+/* Dialog */
+.el-dialog {
+  background-color: var(--bg-card) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 12px !important;
+}
+
+.el-dialog__header {
+  background-color: var(--bg-card) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  padding: 16px 20px !important;
+  margin-right: 0 !important;
+}
+
+.el-dialog__title {
+  color: var(--text-primary) !important;
+}
+
+.el-dialog__body {
+  background-color: var(--bg-card) !important;
+  padding: 20px !important;
+  color: var(--text-primary) !important;
+}
+
+.el-dialog__close {
+  color: var(--text-primary) !important;
+}
+
+.el-dialog__close:hover {
+  color: var(--accent, #38bdf8) !important;
+}
+
 /* Tag */
 .el-tag {
   --el-tag-bg-color: var(--accent-glow) !important;

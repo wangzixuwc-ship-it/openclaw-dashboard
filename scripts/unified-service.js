@@ -5,6 +5,7 @@
  */
 
 import http from 'http'
+import https from 'https'
 import fs from 'fs/promises'
 import fsSync from 'fs'
 import path from 'path'
@@ -33,6 +34,226 @@ const CACHE_TTL = 10000 // 10 秒缓存
 
 // 版本号
 const openclawVersion = process.env.VITE_OPENCLAW_VERSION || 'unknown'
+
+// ============================================
+// 版本管理功能
+// ============================================
+
+// 缓存文件路径：public/versions-cache.json
+const VERSIONS_CACHE_PATH = path.join(__dirname, '..', 'public', 'versions-cache.json')
+
+// 并发锁：防止并发操作
+let syncingVersions = false
+let switchingVersion = false
+
+/**
+ * 读取版本缓存文件
+ */
+async function readVersionsCache() {
+  try {
+    const content = await fs.readFile(VERSIONS_CACHE_PATH, 'utf-8')
+    const data = JSON.parse(content)
+    return data
+  } catch (e) {
+    return { lastSync: null, source: null, versions: [] }
+  }
+}
+
+/**
+ * 原子写入版本缓存（.tmp + rename）
+ */
+async function writeVersionsCache(data) {
+  const tmpPath = VERSIONS_CACHE_PATH + '.tmp'
+  const dir = path.dirname(VERSIONS_CACHE_PATH)
+  await fs.mkdir(dir, { recursive: true })
+  await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf-8')
+  await fs.rename(tmpPath, VERSIONS_CACHE_PATH)
+}
+
+/**
+ * 清理 GitHub release body：去除 Markdown 标记，合并多余换行和空白
+ */
+function cleanReleaseBody(body) {
+  if (!body || typeof body !== 'string') return ''
+  return body
+    .replace(/#{1,6}\s?/g, '')           // 移除 Markdown 标题标记 # ## ###
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // [text](url) → text
+    .replace(/[*_~`]/g, '')              // 移除加粗/斜体/代码标记
+    .replace(/^-+\s+/gm, '• ')           // 列表 - → •
+    .replace(/\n{2,}/g, '\n')            // 合并多余换行
+    .replace(/\r/g, '')                  // 移除 \r
+    .trim()
+}
+
+/**
+ * 从 GitHub Releases API 拉取版本列表（含镜像站回退，自动分页获取全部）
+ */
+async function fetchReleasesFromGitHub() {
+  const officialBase = 'https://api.github.com/repos/openclaw/openclaw/releases?per_page=100'
+  const proxyBase = 'https://gh-proxy.com/' + officialBase
+
+  // 分页拉取所有版本
+  async function fetchAllReleases(basePage) {
+    let allReleases = []
+    let page = 1
+    let hasMore = true
+
+    while (hasMore) {
+      const pageUrl = `${basePage}&page=${page}`
+      const data = await fetchWithTimeout(pageUrl, 30000)
+      const releases = JSON.parse(data)
+
+      if (!Array.isArray(releases) || releases.length === 0) {
+        hasMore = false
+        break
+      }
+
+      allReleases = allReleases.concat(releases)
+
+      // GitHub 返回少于 per_page 说明已经是最后一页
+      if (releases.length < 100) {
+        hasMore = false
+      } else {
+        page++
+      }
+    }
+
+    console.log(`[Version Sync] 共拉取 ${allReleases.length} 条 release（${page} 页）`)
+    return allReleases
+  }
+
+  // 1. 尝试官方 API
+  try {
+    const releases = await fetchAllReleases(officialBase)
+    const source = 'github-api'
+
+    const versions = releases
+      .filter(r => !r.draft)
+      .map(r => ({
+        version: r.tag_name.replace(/^v/, ''),
+        name: r.name || r.tag_name,
+        description: cleanReleaseBody(r.body),
+        publishedAt: r.published_at,
+        prerelease: r.prerelease,
+        htmlUrl: r.html_url
+      }))
+
+    return { versions, source }
+  } catch (e) {
+    console.log(`[Version Sync] 官方 API 失败，尝试镜像站: ${e.message}`)
+  }
+
+  // 2. 回退到 gh-proxy.com
+  try {
+    const releases = await fetchAllReleases(proxyBase)
+    const source = 'gh-proxy'
+
+    const versions = releases
+      .filter(r => !r.draft)
+      .map(r => ({
+        version: r.tag_name.replace(/^v/, ''),
+        name: r.name || r.tag_name,
+        description: cleanReleaseBody(r.body),
+        publishedAt: r.published_at,
+        prerelease: r.prerelease,
+        htmlUrl: r.html_url
+      }))
+
+    return { versions, source }
+  } catch (e) {
+    console.error(`[Version Sync] 镜像站也失败: ${e.message}`)
+    throw new Error(`无法从 GitHub 拉取版本列表: ${e.message}`)
+  }
+}
+
+/**
+ * 带超时的 HTTP GET 请求（使用静态导入的 http/https 模块）
+ */
+function fetchWithTimeout(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url)
+    const isHttps = urlObj.protocol === 'https:'
+    const fetchMod = isHttps ? https : http
+
+    const options = {
+      hostname: urlObj.hostname,
+      port: urlObj.port || (isHttps ? 443 : 80),
+      path: urlObj.pathname + urlObj.search,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'OpenClaw-Dashboard',
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    }
+
+    const req = fetchMod.request(options, (res) => {
+      let data = ''
+      res.on('data', chunk => { data += chunk })
+      res.on('end', () => {
+        clearTimeout(timeoutId)
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(data)
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}`))
+        }
+      })
+    })
+
+    const timeoutId = setTimeout(() => {
+      req.destroy(new Error(`Request timeout after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    req.on('error', (err) => {
+      clearTimeout(timeoutId)
+      reject(err)
+    })
+
+    req.end()
+  })
+}
+
+/**
+ * 切换 OpenClaw 版本（spawn npm install）
+ */
+function switchOpenClawVersion(version) {
+  return new Promise((resolve) => {
+    const isWindows = os.platform() === 'win32'
+    const TIMEOUT_MS = 120000 // 2 分钟超时
+
+    const child = spawn('npm', ['install', '-g', `openclaw@${version}`, '--registry=https://repo.huaweicloud.com/repository/npm/'], {
+      shell: isWindows
+    })
+
+    let stdout = ''
+    let stderr = ''
+    let timedOut = false
+
+    // 使用独立的 setTimeout + child.kill() 替代 spawn timeout 选项
+    const timeoutId = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGKILL')
+      resolve({ success: false, error: `安装超时（${TIMEOUT_MS / 1000}秒）`, stderr: '超时终止' })
+    }, TIMEOUT_MS)
+
+    child.stdout.on('data', data => { stdout += data.toString() })
+    child.stderr.on('data', data => { stderr += data.toString() })
+
+    child.on('close', code => {
+      clearTimeout(timeoutId)
+      if (timedOut) return // 超时已在 timeout 回调中 resolve
+      if (code === 0) {
+        resolve({ success: true, message: `版本切换成功（${version}），请重启网关生效`, stdout })
+      } else {
+        resolve({ success: false, error: `安装失败 (exit code ${code}): ${stderr.trim()}`, stdout, stderr })
+      }
+    })
+
+    child.on('error', err => {
+      clearTimeout(timeoutId)
+      resolve({ success: false, error: err.message })
+    })
+  })
+}
 
 // ============================================
 // Usage Stats 功能
@@ -932,6 +1153,138 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // GET /api/system/versions — 获取版本列表
+  // ============================================
+
+  if (pathname === '/api/system/versions' && req.method === 'GET') {
+    try {
+      const cache = await readVersionsCache()
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        versions: cache.versions || [],
+        lastSync: cache.lastSync || null
+      }))
+    } catch (error) {
+      console.error('[Versions] 读取缓存失败:', error.message)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ versions: [], lastSync: null }))
+    }
+    return
+  }
+
+  // ============================================
+  // POST /api/system/sync-versions — 同步版本列表
+  // ============================================
+
+  if (pathname === '/api/system/sync-versions' && req.method === 'POST') {
+    if (syncingVersions) {
+      res.writeHead(429, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ success: false, error: '版本同步正在进行中，请稍后再试' }))
+      return
+    }
+
+    syncingVersions = true
+    try {
+      const result = await fetchReleasesFromGitHub()
+
+      // 增量合并：读取现有缓存 → 按 tag_name 去重合并 → 写回
+      const existingCache = await readVersionsCache()
+      const existingTags = new Set((existingCache.versions || []).map(v => v.version))
+
+      // 新版本追加到开头，已存在版本保留
+      const newVersions = result.versions.filter(v => !existingTags.has(v.version))
+      const mergedVersions = [...result.versions, ...(existingCache.versions || []).filter(v => !result.versions.some(r => r.version === v.version))]
+
+      // 按 published_at 降序排列
+      mergedVersions.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
+
+      const cacheData = {
+        lastSync: new Date().toISOString(),
+        source: result.source,
+        versions: mergedVersions
+      }
+
+      await writeVersionsCache(cacheData)
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        success: true,
+        count: mergedVersions.length,
+        added: newVersions.length,
+        source: result.source
+      }))
+    } catch (error) {
+      console.error('[Version Sync] 同步失败:', error.message)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ success: false, error: error.message }))
+    } finally {
+      syncingVersions = false
+    }
+    return
+  }
+
+  // ============================================
+  // POST /api/system/switch-version — 切换版本
+  // ============================================
+
+  if (pathname === '/api/system/switch-version' && req.method === 'POST') {
+    let body = ''
+    req.on('data', chunk => { body += chunk.toString() })
+    req.on('end', async () => {
+      try {
+        const input = JSON.parse(body)
+        const { version } = input
+
+        if (!version) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: '缺少 version 参数' }))
+          return
+        }
+
+        // 验证版本格式: YYYY.N.N 或 YYYY.N.N.P
+        if (!/^\d{4}\.\d+\.\d+$/.test(version)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: '版本格式不正确，应为 YYYY.N.N（如 2026.3.28）' }))
+          return
+        }
+
+        if (switchingVersion) {
+          res.writeHead(429, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: '版本切换正在进行中，请稍后再试' }))
+          return
+        }
+
+        switchingVersion = true
+        try {
+          const result = await switchOpenClawVersion(version)
+
+          if (result.success) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+              success: true,
+              message: '版本切换成功，请重启网关生效'
+            }))
+          } else {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+              success: false,
+              error: result.error
+            }))
+          }
+        } finally {
+          switchingVersion = false
+        }
+      } catch (error) {
+        console.error('[Switch Version] 解析错误:', error.message)
+        switchingVersion = false
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: 'Invalid JSON' }))
+      }
+    })
+    return
+  }
+
+  // ============================================
   // Reset Agent API
   // ============================================
 
@@ -1538,12 +1891,15 @@ server.listen(PORT, () => {
   console.log(`[提示] 按 Ctrl+C 可停止服务`)
   console.log('')
   console.log('[API 端点]')
-  console.log('  GET  /api/gpu-vram           - GPU VRAM 使用情况')
-  console.log('  GET  /api/usage              - 获取用量统计')
-  console.log('  GET  /api/health             - 健康检查')
-  console.log('  GET  /api/system/version     - OpenClaw 版本号')
-  console.log('  POST /reset                  - 重置 Agent')
-  console.log('  POST /api/upload-image       - 图片上传 (base64, ≤5MB)')
+  console.log('  GET  /api/gpu-vram              - GPU VRAM 使用情况')
+  console.log('  GET  /api/usage                 - 获取用量统计')
+  console.log('  GET  /api/health                - 健康检查')
+  console.log('  GET  /api/system/version        - OpenClaw 版本号')
+  console.log('  GET  /api/system/versions       - 获取版本列表')
+  console.log('  POST /api/system/sync-versions  - 同步版本列表')
+  console.log('  POST /api/system/switch-version - 切换版本')
+  console.log('  POST /reset                     - 重置 Agent')
+  console.log('  POST /api/upload-image           - 图片上传 (base64, ≤5MB)')
   console.log('')
   console.log('[项目管理 API]')
   console.log('  GET    /api/projects              - 获取所有项目列表')
