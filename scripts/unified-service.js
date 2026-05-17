@@ -821,14 +821,13 @@ const server = http.createServer(async (req, res) => {
       const config = JSON.parse(raw)
       const agentsList = config?.agents?.list || []
 
-      // 提取每个 agent 的关键信息
       const agents = agentsList.map(a => ({
         id: a.id,
         name: a?.identity?.name || a.name || a.id,
         emoji: a?.identity?.emoji || '',
         model: a.model || (config?.agents?.defaults?.model?.primary || 'unknown'),
         workspace: a.workspace || null,
-        configured: true,  // 标记为"已配置"
+        configured: true,
       }))
 
       res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -847,10 +846,9 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/agent-running-status' && req.method === 'GET') {
     try {
-      const RUNNING_THRESHOLD_MS = 90 * 1000  // 90秒内有写入 = 正在运行
+      const RUNNING_THRESHOLD_MS = 90 * 1000
       const now = Date.now()
-      // agent 目录名即 agent id（main=叶溪, pm, developer, tester, inspector, archivist）
-      const agentIds = ['main', 'pm', 'developer', 'tester', 'inspector', 'archivist']
+      const agentIds = ['main', 'pm', 'developer', 'tester', 'inspector', 'archivist', 'designer']
       const results = []
 
       for (const id of agentIds) {
@@ -859,7 +857,6 @@ const server = http.createServer(async (req, res) => {
 
         try {
           const files = fsSync.readdirSync(sessionsDir)
-          // 只看主会话文件（排除 trajectory、reset 备份、tmp 临时文件）
           const sessionFiles = files.filter(f =>
             f.endsWith('.jsonl') &&
             !f.includes('.trajectory') &&
@@ -872,9 +869,7 @@ const server = http.createServer(async (req, res) => {
             const stat = fsSync.statSync(path.join(sessionsDir, file))
             if (stat.mtimeMs > latestMtime) latestMtime = stat.mtimeMs
           }
-        } catch (e) {
-          // 目录不存在或无权限，忽略
-        }
+        } catch (e) { /* 目录不存在，忽略 */ }
 
         const msAgo = latestMtime > 0 ? now - latestMtime : Infinity
         results.push({
@@ -893,6 +888,47 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ error: e.message, agents: [] }))
     }
     return
+  }
+
+  // ============================================
+  // System Version API
+  // ============================================
+
+  if (pathname === '/api/system/version') {
+    if (req.method === 'GET') {
+      const isWindows = os.platform() === 'win32'
+      const command = isWindows ? 'openclaw.cmd' : 'openclaw'
+      const args = ['-v']
+
+      const child = spawn(command, args, { shell: isWindows, timeout: 10000 })
+
+      let stdout = ''
+      let stderr = ''
+
+      child.stdout.on('data', (data) => { stdout += data.toString() })
+      child.stderr.on('data', (data) => { stderr += data.toString() })
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          const match = stdout.match(/(\d{4}\.\d+\.\d+)/)
+          const version = match ? match[1] : 'unknown'
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ version }))
+        } else {
+          const error = stderr.trim() || `Exit code ${code}`
+          console.error(`[System Version] Error: ${error}`)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ version: 'unknown', error }))
+        }
+      })
+
+      child.on('error', (err) => {
+        console.error(`[System Version] Spawn error: ${err.message}`)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ version: 'unknown', error: err.message }))
+      })
+      return
+    }
   }
 
   // ============================================
@@ -1505,6 +1541,7 @@ server.listen(PORT, () => {
   console.log('  GET  /api/gpu-vram           - GPU VRAM 使用情况')
   console.log('  GET  /api/usage              - 获取用量统计')
   console.log('  GET  /api/health             - 健康检查')
+  console.log('  GET  /api/system/version     - OpenClaw 版本号')
   console.log('  POST /reset                  - 重置 Agent')
   console.log('  POST /api/upload-image       - 图片上传 (base64, ≤5MB)')
   console.log('')

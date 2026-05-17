@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "lastUpdated": "2026-05-17T02:15:48.753Z",
+  "lastUpdated": "2026-05-17T08:46:21.583Z",
   "activeProjectId": "proj-002",
   "scanIntervalMs": 30000,
   "projects": [
@@ -17,7 +17,7 @@
       "linkedAgents": [],
       "taskQueue": [],
       "createdAt": "2026-05-15T15:31:25.610Z",
-      "updatedAt": "2026-05-17T02:15:48.753Z"
+      "updatedAt": "2026-05-17T08:46:21.583Z"
     }
   ]
 }

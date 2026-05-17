@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+
+// 读取 package.json 版本号
+const pkg = JSON.parse(readFileSync(`${process.cwd()}/package.json`, 'utf-8'))
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -16,6 +20,9 @@ export default defineConfig(({ mode }) => {
   console.log('[Vite] Backend Port (for proxy):', backendPort)
 
   return {
+    define: {
+      __APP_VERSION__: JSON.stringify(pkg.version),
+    },
     plugins: [
       vue(),
       AutoImport({
@@ -61,6 +68,11 @@ export default defineConfig(({ mode }) => {
         },
         '/uploads': {
           // 上传图片静态文件 (端口 31002, REC-093)
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
+        '/api/system': {
+          // 系统版本 API (端口 31002, REC-066)
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },

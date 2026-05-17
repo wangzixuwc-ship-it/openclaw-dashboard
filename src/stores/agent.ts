@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { sessionsList, sessionStatus, health, sessionsHistory, agentsList, getGpuVramUsage, sessionsSend } from '../api/gateway'
 import { getUsageStats } from '../api/usage-stats'
+import { getVersion } from '../api/system'
 
 // Constants
 const HEALTH_CHECK_INTERVAL = 10000 // 10s
@@ -525,6 +526,17 @@ export const useAgentStore = defineStore('agent', () => {
     } catch (e) {
       console.warn('[AgentStore] fetchHealth error:', e)
       healthStatus.value = 'unhealthy' // 请求失败视为不健康
+    }
+
+    // REC-066: 从后端 /api/system/version 获取版本号
+    try {
+      const versionData = await getVersion()
+      if (versionData && versionData.version) {
+        gatewayVersion.value = versionData.version
+      }
+    } catch (e) {
+      console.warn('[AgentStore] getVersion error:', e)
+      // 不覆盖已有版本号，保持 /health 或 env 的值
     }
   }
 

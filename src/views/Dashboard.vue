@@ -5,7 +5,10 @@
       <div class="status-bar-inner">
         <div class="brand">
           <el-icon :size="24" class="brand-icon"><Monitor /></el-icon>
-          <h1 class="brand-title">OpenClaw 监控台</h1>
+          <h1 class="brand-title">
+            OpenClaw 监控台
+            <span class="brand-version">v{{ APP_VERSION }}</span>
+          </h1>
           <span class="brand-time">{{ currentTime }}</span>
         </div>
 
@@ -256,6 +259,9 @@ import {
   QuestionFilled,
 } from '@element-plus/icons-vue'
 
+// App version from package.json (injected by Vite define)
+const APP_VERSION: string = __APP_VERSION__
+
 const store = useAgentStore()
 
 // Real-time clock in status bar (updates every minute)
@@ -494,6 +500,16 @@ onUnmounted(() => {
    -webkit-background-clip: text;
    -webkit-text-fill-color: transparent;
    background-clip: text;
+   display: flex;
+   align-items: baseline;
+   gap: 6px;
+ }
+
+ .brand-version {
+   font-size: 12px;
+   font-weight: 400;
+   color: var(--text-secondary);
+   -webkit-text-fill-color: var(--text-secondary);
  }
 
  .brand-time {
