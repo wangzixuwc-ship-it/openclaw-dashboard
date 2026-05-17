@@ -35,9 +35,9 @@ export async function switchVersion(version: string) {
   const resp = await axios.post(
     `${BACKEND_URL}/api/system/switch-version`,
     { version },
-    { timeout: 120000 }
+    { timeout: 180000 }
   )
-  return resp.data as { success: boolean; message?: string; error?: string }
+  return resp.data as { success: boolean; message?: string; error?: string; restarted?: boolean; stdout?: string; stderr?: string }
 }
 
 export async function getCurrentVersion() {

@@ -16,6 +16,12 @@
       <span v-else class="last-sync">尚未同步</span>
     </div>
 
+    <!-- 版本切换进度提示 -->
+    <div v-if="switching" class="switch-progress-bar">
+      <el-icon class="is-loading" :size="16"><Loading /></el-icon>
+      <span class="switch-progress-text">{{ switchProgress || '正在切换版本...' }}</span>
+    </div>
+
     <el-table
       ref="tableRef"
       :data="versions"
@@ -49,9 +55,11 @@
             v-else
             size="small"
             type="primary"
+            :loading="switching === row.version"
+            :disabled="switching !== null"
             @click="handleSwitch(row.version)"
           >
-            切换
+            {{ switching === row.version ? '切换中...' : '切换' }}
           </el-button>
         </template>
       </el-table-column>
@@ -124,6 +132,8 @@ const versions = ref<VersionInfo[]>([])
 const loading = ref(false)
 const moreLoading = ref(false)
 const syncing = ref(false)
+const switching = ref<string | null>(null)
+const switchProgress = ref('')
 const lastSync = ref<string | null>(null)
 const currentPage = ref(1)
 const pageSize = 10
@@ -230,15 +240,31 @@ async function handleSync(): Promise<void> {
 async function handleSwitch(version: string): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      `确认切换到版本 ${version}？切换后请重启网关生效。`,
+      `确认切换到版本 ${version}？切换后网关将自动重启，Dashboard 会短暂断开。`,
       '确认切换版本',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
 
+    switching.value = version
+    switchProgress.value = '正在安装 openclaw@' + version + '...'
+
     const result = await switchVersion(version)
     if (result.success) {
-      ElMessage.success(`切换成功，请重启网关生效`)
-      await loadVersions()
+      if (result.restarted) {
+        // 网关已重启，前端显示重连提示
+        ElMessage.success(result.message || '版本切换成功，网关已重启')
+        // 等待连接恢复后刷新列表
+        setTimeout(async () => {
+          try {
+            await loadVersions()
+          } catch {
+            ElMessage.info('Dashboard 正在重连，请稍后刷新')
+          }
+        }, 3000)
+      } else {
+        ElMessage.success(result.message || '切换成功')
+        await loadVersions()
+      }
     } else {
       ElMessage.error(result.error || result.message || '切换失败')
     }
@@ -246,6 +272,9 @@ async function handleSwitch(version: string): Promise<void> {
     if (err !== 'cancel') {
       ElMessage.error('切换请求失败')
     }
+  } finally {
+    switching.value = null
+    switchProgress.value = ''
   }
 }
 
@@ -335,6 +364,23 @@ onUnmounted(() => {
 .last-sync {
   font-size: 13px;
   color: var(--text-secondary, #9ca3af);
+}
+
+/* 版本切换进度条 */
+.switch-progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.switch-progress-text {
+  font-size: 13px;
+  color: var(--text-primary);
 }
 
 .desc-cell {

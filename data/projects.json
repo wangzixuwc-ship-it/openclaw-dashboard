@@ -1,23 +1,7 @@
 {
   "version": "1.0",
-  "lastUpdated": "2026-05-17T20:17:10.015Z",
-  "activeProjectId": "proj-002",
+  "lastUpdated": "2026-05-17T21:22:24.410Z",
+  "activeProjectId": null,
   "scanIntervalMs": 30000,
-  "projects": [
-    {
-      "id": "proj-002",
-      "name": "OpenClaw监控台",
-      "description": "",
-      "rootPath": "D:\\AI\\openclaw-dashboard",
-      "subPath": "",
-      "status": "active",
-      "progress": 0,
-      "manualOverride": false,
-      "tags": [],
-      "linkedAgents": [],
-      "taskQueue": [],
-      "createdAt": "2026-05-15T15:31:25.610Z",
-      "updatedAt": "2026-05-17T20:17:10.015Z"
-    }
-  ]
+  "projects": []
 }

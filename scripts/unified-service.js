@@ -213,38 +213,33 @@ function fetchWithTimeout(url, timeoutMs) {
 }
 
 /**
- * 切换 OpenClaw 版本（spawn npm install）
+ * 执行单个命令（spawn），返回 { success, stdout, stderr, error }
  */
-function switchOpenClawVersion(version) {
+function runCommand(command, args, timeoutMs) {
   return new Promise((resolve) => {
     const isWindows = os.platform() === 'win32'
-    const TIMEOUT_MS = 120000 // 2 分钟超时
-
-    const child = spawn('npm', ['install', '-g', `openclaw@${version}`, '--registry=https://repo.huaweicloud.com/repository/npm/'], {
-      shell: isWindows
-    })
+    const child = spawn(command, args, { shell: isWindows })
 
     let stdout = ''
     let stderr = ''
     let timedOut = false
 
-    // 使用独立的 setTimeout + child.kill() 替代 spawn timeout 选项
     const timeoutId = setTimeout(() => {
       timedOut = true
       child.kill('SIGKILL')
-      resolve({ success: false, error: `安装超时（${TIMEOUT_MS / 1000}秒）`, stderr: '超时终止' })
-    }, TIMEOUT_MS)
+      resolve({ success: false, error: `命令超时（${timeoutMs / 1000}秒）`, stderr: '超时终止' })
+    }, timeoutMs)
 
     child.stdout.on('data', data => { stdout += data.toString() })
     child.stderr.on('data', data => { stderr += data.toString() })
 
     child.on('close', code => {
       clearTimeout(timeoutId)
-      if (timedOut) return // 超时已在 timeout 回调中 resolve
+      if (timedOut) return
       if (code === 0) {
-        resolve({ success: true, message: `版本切换成功（${version}），请重启网关生效`, stdout })
+        resolve({ success: true, stdout, stderr })
       } else {
-        resolve({ success: false, error: `安装失败 (exit code ${code}): ${stderr.trim()}`, stdout, stderr })
+        resolve({ success: false, error: `exit code ${code}: ${stderr.trim()}`, stdout, stderr })
       }
     })
 
@@ -253,6 +248,41 @@ function switchOpenClawVersion(version) {
       resolve({ success: false, error: err.message })
     })
   })
+}
+
+/**
+ * 切换 OpenClaw 版本：串行执行 npm install → gateway restart
+ */
+async function switchOpenClawVersion(version) {
+  const INSTALL_TIMEOUT = 1200000  // 安装 20 分钟超时
+  const RESTART_TIMEOUT = 30000   // 重启 30 秒超时
+
+  console.log(`[Switch Version] 开始安装 openclaw@${version}`)
+
+  // Step 1: npm install -g
+  const installResult = await runCommand(
+    'npm',
+    ['install', '-g', `openclaw@${version}`, '--registry=https://repo.huaweicloud.com/repository/npm/'],
+    INSTALL_TIMEOUT
+  )
+
+  if (!installResult.success) {
+    console.error(`[Switch Version] 安装失败: ${installResult.error}`)
+    return { success: false, error: `安装失败: ${installResult.error}`, stdout: installResult.stdout, stderr: installResult.stderr }
+  }
+
+  console.log(`[Switch Version] 安装成功，开始重启网关`)
+
+  // Step 2: openclaw gateway restart
+  const restartResult = await runCommand('openclaw', ['gateway', 'restart'], RESTART_TIMEOUT)
+
+  if (!restartResult.success) {
+    console.error(`[Switch Version] 网关重启失败: ${restartResult.error}`)
+    return { success: false, error: `安装成功但网关重启失败: ${restartResult.error}`, stdout: restartResult.stdout, stderr: restartResult.stderr }
+  }
+
+  console.log(`[Switch Version] 版本切换完成（${version}），网关已重启`)
+  return { success: true, message: `版本已切换到 ${version}，网关已重启` }
 }
 
 // ============================================
@@ -1262,13 +1292,16 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({
               success: true,
-              message: '版本切换成功，请重启网关生效'
+              message: result.message || `版本已切换到 ${version}，网关已重启`,
+              restarted: true
             }))
           } else {
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({
               success: false,
-              error: result.error
+              error: result.error,
+              stdout: result.stdout || '',
+              stderr: result.stderr || ''
             }))
           }
         } finally {
