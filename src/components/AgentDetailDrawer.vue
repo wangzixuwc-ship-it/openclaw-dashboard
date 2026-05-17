@@ -1,25 +1,17 @@
 <template>
-  <el-drawer
-    v-model="drawerVisible"
-    :title="`Agent 详情：${displayAgentName}`"
-    size="1040px"
-    direction="rtl"
-    :close-on-click-modal="true"
-    destroy-on-close
-    :z-index="3000"
-    @opened="onDrawerOpened"
-  >
+  <el-drawer v-model="drawerVisible" :title="`Agent 详情：${displayAgentName}`" size="1040px" direction="rtl"
+    :close-on-click-modal="true" :z-index="3000">
     <template #header>
       <div class="drawer-title">
-        <el-icon :size="20" :class="statusColorClass"><component :is="drawerAvatarIcon" /></el-icon>
+        <el-icon :size="20" :class="statusColorClass">
+          <component :is="drawerAvatarIcon" />
+        </el-icon>
         <span class="title-text">{{ displayAgentName }}</span>
-        <el-tag
-          :type="statusTagType"
-          :effect="agent?.status === 'running' ? 'dark' : 'light'"
-          size="small"
-          class="status-badge"
-        >
-          <el-icon><component :is="statusIcon" /></el-icon>
+        <el-tag :type="statusTagType" :effect="agent?.status === 'running' ? 'dark' : 'light'" size="small"
+          class="status-badge">
+          <el-icon>
+            <component :is="statusIcon" />
+          </el-icon>
           {{ displayStatus }}
         </el-tag>
       </div>
@@ -29,7 +21,7 @@
       <div class="drawer-body">
         <!-- ========= 左侧：消息区域 ========= -->
         <div class="drawer-left">
-          <div ref="msgContainerRef" class="left-scroll-wrap" @scroll="handleScroll">
+          <div class="left-scroll-wrap">
             <el-card class="detail-section msg-section" shadow="never">
               <template #header>
                 <div class="section-header">
@@ -41,24 +33,26 @@
                 </div>
               </template>
 
-              <el-empty v-if="recentMessages.length === 0" class="msg-card-inner empty-area" description="暂无消息" :image-size="60" />
+              <div ref="msgContainerRef" class="msg-scroll-wrap">
+                <el-empty v-if="recentMessages.length === 0" class="msg-card-inner empty-area" description="暂无消息" :image-size="60" />
 
-              <div v-else class="msg-card-inner">
-                <div class="messages-list-outer" @click="handleMsgImageClick">
-                  <div
-                    v-for="(msg, idx) in recentMessages"
-                    :key="idx"
-                    class="chat-row"
-                    :class="msg.role === 'user' ? 'chat-row-user' : 'chat-row-assistant'"
-                  >
+                <div v-else class="msg-card-inner">
+                  <div class="messages-list-outer" @click="handleMsgImageClick">
                     <div
-                      class="chat-bubble"
-                      :class="bubbleClass(msg)"
+                      v-for="(msg, idx) in recentMessages"
+                      :key="idx"
+                      class="chat-row"
+                      :class="msg.role === 'user' ? 'chat-row-user' : 'chat-row-assistant'"
                     >
-                      <div class="bubble-label" v-if="msg.contentType === 'thinking'">💭 思考</div>
-                      <div class="bubble-label" v-else-if="msg.contentType === 'tool_use'">🔧 工具调用</div>
-                      <div class="bubble-label" v-else-if="msg.contentType === 'tool_result'">🔧 工具结果</div>
-                      <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                      <div
+                        class="chat-bubble"
+                        :class="bubbleClass(msg)"
+                      >
+                        <div class="bubble-label" v-if="msg.contentType === 'thinking'">💭 思考</div>
+                        <div class="bubble-label" v-else-if="msg.contentType === 'tool_use'">🔧 工具调用</div>
+                        <div class="bubble-label" v-else-if="msg.contentType === 'tool_result'">🔧 工具结果</div>
+                        <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -71,29 +65,15 @@
               <div v-if="imageAttachments.length > 0" class="image-preview-strip">
                 <div v-for="(img, idx) in imageAttachments" :key="idx" class="image-preview-item">
                   <img :src="img.url" class="image-preview-thumb" @click="previewImageUrl = img.url" />
-                  <el-button
-                    class="image-remove-btn"
-                    size="small"
-                    circle
-                    @click="imageAttachments.splice(idx, 1)"
-                  >×</el-button>
+                  <el-button class="image-remove-btn" size="small" circle
+                    @click="imageAttachments.splice(idx, 1)">×</el-button>
                 </div>
               </div>
               <div class="send-row">
-                <el-input
-                  v-model="chatInput"
-                  type="textarea"
-                  :rows="2"
-                  placeholder="输入消息... (Enter 发送，Ctrl+Enter 换行，支持粘贴图片)"
-                  :disabled="sending"
-                  @keydown="handleInputKeydown"
-                />
-                <el-button
-                  type="primary"
-                  :icon="Promotion"
-                  :loading="sending"
-                  @click="sendMessage"
-                >
+                <el-input v-model="chatInput" type="textarea" :rows="2"
+                  placeholder="输入消息... (Enter 发送，Ctrl+Enter 换行，支持粘贴图片)" :disabled="sending"
+                  @keydown="handleInputKeydown" />
+                <el-button type="primary" :icon="Promotion" :loading="sending" @click="sendMessage">
                   发送
                 </el-button>
               </div>
@@ -102,7 +82,9 @@
 
           <!-- 手动加载历史时左侧消息区域的 loading 遮罩 -->
           <div v-if="loadingHistory" class="left-loading-overlay">
-            <el-icon class="is-loading" :size="28"><Loading /></el-icon>
+            <el-icon class="is-loading" :size="28">
+              <Loading />
+            </el-icon>
             <span>正在加载会话历史...</span>
           </div>
         </div>
@@ -113,7 +95,9 @@
           <el-card class="detail-section" shadow="never">
             <template #header>
               <div class="section-header">
-                <el-icon><InfoFilled /></el-icon>
+                <el-icon>
+                  <InfoFilled />
+                </el-icon>
                 会话信息
               </div>
             </template>
@@ -121,7 +105,8 @@
             <div class="info-grid">
               <div class="info-item">
                 <span class="info-label">当前任务</span>
-                <span class="info-value monospace" :title="agent.label || agent.key">{{ agent.label || agent.key }}</span>
+                <span class="info-value monospace" :title="agent.label || agent.key">{{ agent.label || agent.key
+                  }}</span>
               </div>
               <div class="info-item" v-if="agent.model">
                 <span class="info-label">模型</span>
@@ -146,7 +131,9 @@
           <el-card class="detail-section" shadow="never" v-if="agent.tokenUsage">
             <template #header>
               <div class="section-header">
-                <el-icon><Coin /></el-icon>
+                <el-icon>
+                  <Coin />
+                </el-icon>
                 上下文使用
               </div>
             </template>
@@ -169,13 +156,8 @@
                 </div>
               </div>
 
-              <el-progress
-                :percentage="agent.tokenUsage.percentage"
-                :status="tokenProgressStatus"
-                :stroke-width="12"
-                :show-text="false"
-                class="token-progress"
-              />
+              <el-progress :percentage="agent.tokenUsage.percentage" :status="tokenProgressStatus" :stroke-width="12"
+                :show-text="false" class="token-progress" />
             </div>
           </el-card>
 
@@ -183,7 +165,9 @@
           <el-card class="detail-section" shadow="never" v-if="agent.details">
             <template #header>
               <div class="section-header">
-                <el-icon><Document /></el-icon>
+                <el-icon>
+                  <Document />
+                </el-icon>
                 原始详情
               </div>
             </template>
@@ -192,31 +176,10 @@
 
           <!-- Action Buttons -->
           <div class="action-bar">
-            <el-popconfirm
-              title="确认重置会话？此操作不可撤销。"
-              confirm-button-text="确认重置"
-              cancel-button-text="取消"
-              confirm-button-type="danger"
-              width="260"
-              :z-index="4000"
-              @confirm="handleResetSession"
-              :disabled="resetting"
-            >
-              <template #reference>
-                <el-button
-                  type="danger"
-                  :icon="Refresh"
-                  :loading="resetting"
-                >
-                  重置会话
-                </el-button>
-              </template>
-            </el-popconfirm>
-            <el-button
-              :icon="View"
-              @click="loadHistory()"
-              :loading="loadingHistory"
-            >
+            <el-button type="danger" :icon="Refresh" @click="handleResetSession" :loading="resetting">
+              重置会话
+            </el-button>
+            <el-button :icon="View" @click="loadHistory()" :loading="loadingHistory">
               加载历史
             </el-button>
           </div>
@@ -224,18 +187,13 @@
       </div>
     </template>
     <!-- 图片放大预览 -->
-    <el-image-viewer
-      v-if="previewImageUrl"
-      :url-list="[previewImageUrl]"
-      :z-index="4000"
-      hide-on-click-modal
-      @close="previewImageUrl = ''"
-    />
+    <el-image-viewer v-if="previewImageUrl" :url-list="[previewImageUrl]" :z-index="4000" hide-on-click-modal
+      @close="previewImageUrl = ''" />
   </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted, nextTick, type Component } from 'vue'
+import { ref, computed, watch, nextTick, type Component } from 'vue'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
@@ -316,9 +274,6 @@ interface ImageAttachment {
 }
 const imageAttachments = ref<ImageAttachment[]>([])
 const previewImageUrl = ref('') // 图片预览弹窗
-
-// 自动滚动到底部（默认开启，手动上滚暂停）
-const autoScrollToBottom = ref(true)
 
 // Computed
 const displayStatus = computed(() => {
@@ -514,7 +469,7 @@ marked.use(
 function renderMarkdown(content: string): string {
   if (!content) return ''
   try {
-    const raw = marked.parse(content, { async: false }) as string
+    const raw = marked.parse(content, { async: false, breaks: true }) as string
     return DOMPurify.sanitize(raw)
   } catch {
     // fallback: escape HTML 并作为纯文本显示
@@ -621,21 +576,23 @@ function splitContentParts(content: unknown): { contentType: string; content: st
   return [{ contentType: 'text', content: String(content ?? '') }]
 }
 
-// Actions
-async function loadHistory(silent: boolean = false, forceScrollBottom = false): Promise<void> {
+/** 判断滚动条是否在底部附近 */
+function isScrolledToBottom(): boolean {
+  const el = msgContainerRef.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 40
+}
+
+async function loadHistory(silent: boolean = false, scrollToEnd: boolean = true): Promise<void> {
   if (!agent.value?.key) return
   const startedAt = Date.now()
-  const MIN_LOADING_MS = 500 // 手动加载时 loading 至少显示 500ms，确保用户能感知到反馈
+  const MIN_LOADING_MS = 500
   if (!silent) loadingHistory.value = true
-
   try {
     const history = await store.fetchSessionHistory(agent.value.key)
     historyCount.value = history.length
 
-    // 将每条消息按内容类型拆分为独立气泡
-    // 思考、工具调用、工具结果、回复各自独立显示
     const normalized = (history as Record<string, unknown>[]).flatMap((raw) => {
-      // 解包 message 字段：API 返回的消息可能包在 { message: { role, content } } 中
       const item = (raw && typeof raw === 'object' && raw.message && typeof raw.message === 'object'
         ? (raw.message as Record<string, unknown>)
         : raw) as Record<string, unknown>
@@ -644,15 +601,13 @@ async function loadHistory(silent: boolean = false, forceScrollBottom = false): 
 
       return parts.map((part) => {
         let content = part.content
-        // assistant 消息清洗 thinking 标签（兼容纯文本格式）
         if (role === 'assistant') {
           content = cleanContent(content)
         }
 
-        // 根据内容类型决定气泡角色
         const bubbleRole = part.contentType === 'thinking' ? 'thinking'
           : (part.contentType === 'tool_use' || part.contentType === 'tool_result') ? 'tool'
-          : (['user', 'assistant', 'system'].includes(role) ? role : 'assistant')
+            : (['user', 'assistant', 'system'].includes(role) ? role : 'assistant')
 
         return {
           role: bubbleRole,
@@ -662,15 +617,8 @@ async function loadHistory(silent: boolean = false, forceScrollBottom = false): 
       })
     })
 
-    // 过滤清洗后为空的
     const cleanMessages = normalized.filter((msg) => msg.content.length > 0)
-
     recentMessages.value = cleanMessages
-
-    // 强制滚动到底部（首次打开时）
-    if (forceScrollBottom) {
-      scrollToBottom()
-    }
   } finally {
     if (!silent) {
       const elapsed = Date.now() - startedAt
@@ -680,6 +628,10 @@ async function loadHistory(silent: boolean = false, forceScrollBottom = false): 
       }
       loadingHistory.value = false
     }
+  }
+  if (scrollToEnd) {
+    await nextTick()
+    scrollToBottom()
   }
 }
 
@@ -772,12 +724,22 @@ async function refreshStatus(): Promise<void> {
 
 async function handleResetSession(): Promise<void> {
   if (!agent.value?.key) return
-  
+
   try {
+    await ElMessageBox.confirm(
+      `确定要重置 "${displayAgentName.value}" 的会话吗？这将执行命令：openclaw agent --agent ${agent.value.key.split(':')[1] || agent.value.key} --message "/reset"`,
+      '重置会话',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+
     resetting.value = true
     await store.resetSession(agent.value.key)
     ElMessage.success('已执行重置命令')
-    
+
     // 刷新状态
     await refreshStatus()
   } catch (e: any) {
@@ -829,7 +791,7 @@ async function handleResetSession(): Promise<void> {
             type: 'warning',
             dangerouslyUseHTMLString: true,
           }
-        ).catch(() => {}) // 忽略关闭弹窗
+        ).catch(() => { }) // 忽略关闭弹窗
       } else {
         ElMessage.error(userMessage.replace(/\n/g, ' '))
       }
@@ -843,50 +805,20 @@ async function handleResetSession(): Promise<void> {
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
-// 组件卸载时清理定时器
-onUnmounted(() => {
-  if (refreshTimer !== null) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-})
-
-// 滚动辅助函数
-function scrollToBottom(): void {
-  nextTick(() => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const el = msgContainerRef.value
-        if (el) el.scrollTop = el.scrollHeight
-      })
-    })
-  })
-}
-
-// 处理滚动事件：判断用户是否在底部 60px 内恢复自动跟随
-function handleScroll(): void {
-  const el = msgContainerRef.value
-  if (!el) return
-  const threshold = 60
-  autoScrollToBottom.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold
-}
-
-// Drawer @opened 事件：首次打开时加载历史并滚动到底部
-async function onDrawerOpened(): Promise<void> {
-  if (agent.value) {
-    await loadHistory(false, true)
-  }
-}
-
 // Watch for drawer open
 watch(drawerVisible, (val) => {
   if (val && agent.value) {
+    // Load history on open - 首次打开强制滚动到底部
+    loadHistory(false, true)
+    // 抽屉打开期间定时刷新消息
     refreshTimer = setInterval(() => {
       if (drawerVisible.value && agent.value) {
-        loadHistory(true)
+        const wasAtBottom = isScrolledToBottom()
+        loadHistory(true, wasAtBottom) // 静默刷新，仅在用户已在底部时保持底部
       }
     }, 3000)
   } else if (!val) {
+    // 关闭抽屉时停止刷新
     if (refreshTimer !== null) {
       clearInterval(refreshTimer)
       refreshTimer = null
@@ -894,12 +826,24 @@ watch(drawerVisible, (val) => {
   }
 })
 
-// 新消息到达时自动滚动（autoScrollToBottom=true 时）
-watch(recentMessages, () => {
-  if (autoScrollToBottom.value) {
-    scrollToBottom()
+/** 滚动到最后一条消息 */
+function scrollToBottom(): void {
+  const container = msgContainerRef.value
+  if (!container) return
+  const lastRow = container.querySelector('.chat-row:last-child') as HTMLElement | null
+  if (lastRow) {
+    lastRow.scrollIntoView({ block: 'end', behavior: 'instant' })
+  } else {
+    container.scrollTop = container.scrollHeight
   }
-})
+}
+
+// 新消息到达时仅在已处于底部的情况下自动滚动到底部
+watch(recentMessages, () => {
+  if (isScrolledToBottom()) {
+    nextTick(() => scrollToBottom())
+  }
+}, { deep: false })
 </script>
 
 <style scoped>
@@ -940,17 +884,24 @@ watch(recentMessages, () => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  position: relative; /* 让加载遮罩可以 absolute 覆盖 */
+  position: relative;
+  /* 让加载遮罩可以 absolute 覆盖 */
 }
 
-/* ── 左面板滚动容器 (Card + 发送栏 整体滚动) ── */
+/* ── 左面板滚动容器 (Card + 发送栏 整体布局) ── */
 .left-scroll-wrap {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+/* ── el-card body 内的消息滚动容器 ── */
+.msg-scroll-wrap {
+  flex: 1;
   overflow-y: auto;
   min-height: 0;
-  overflow-anchor: none; /* 禁用浏览器 scroll anchoring，防止 DOM 重渲染时自动滚动 */
+  scroll-behavior: smooth;
 }
 
 /* ── 消息 Card：纯视觉容器，不管 overflow ── */
@@ -961,7 +912,7 @@ watch(recentMessages, () => {
 .drawer-left .msg-section :deep(.el-card) {
   display: flex;
   flex-direction: column;
-  overflow: visible; /* 覆盖 el-card 默认 overflow:hidden，确保消息内容不备剪裁，.left-scroll-wrap 能正确计算滚动高度 */
+  overflow: visible;
 }
 
 .drawer-left .msg-section :deep(.el-card__body) {
@@ -973,7 +924,7 @@ watch(recentMessages, () => {
 
 /* ── Card body 内： loading/empty/messages ── */
 .msg-card-inner {
-  flex: 1;
+  min-height: 0;
 }
 
 .msg-card-inner.empty-area {
@@ -1173,16 +1124,38 @@ watch(recentMessages, () => {
 
 
 /* Text colors */
-.text-success { color: var(--el-color-success); }
-.text-warning { color: var(--el-color-warning); }
-.text-danger { color: var(--el-color-danger); }
+.text-success {
+  color: var(--el-color-success);
+}
+
+.text-warning {
+  color: var(--el-color-warning);
+}
+
+.text-danger {
+  color: var(--el-color-danger);
+}
 
 /* Status colors */
-.status-running { color: var(--el-color-success); }
-.status-idle { color: var(--el-color-warning); }
-.status-error { color: var(--el-color-danger); }
-.status-aborted { color: var(--el-color-info); }
-.status-unknown { color: var(--el-text-color-secondary); }
+.status-running {
+  color: var(--el-color-success);
+}
+
+.status-idle {
+  color: var(--el-color-warning);
+}
+
+.status-error {
+  color: var(--el-color-danger);
+}
+
+.status-aborted {
+  color: var(--el-color-info);
+}
+
+.status-unknown {
+  color: var(--el-text-color-secondary);
+}
 
 /* Action bar */
 .action-bar {
@@ -1303,9 +1276,6 @@ watch(recentMessages, () => {
   line-height: 20px;
   border-radius: 50%;
 }
-
-/* 左面板滚动平滑 — 被上面 auto 规则覆盖，参考保留 */
-/* scroll-behavior: smooth; 与 JS scrollTop 赋值冲突，改为 auto 确保即时滚动 */
 </style>
 
 <!-- 非 scoped：v-html 渲染的 markdown 内容不受 scoped 限制 -->
@@ -1320,6 +1290,7 @@ watch(recentMessages, () => {
 .markdown-body p {
   margin: 0 0 8px;
 }
+
 .markdown-body p:last-child {
   margin-bottom: 0;
 }
@@ -1336,12 +1307,24 @@ watch(recentMessages, () => {
   line-height: 1.35;
   letter-spacing: -0.01em;
 }
-.markdown-body h1 { font-size: 17px; }
-.markdown-body h2 { font-size: 15.5px; }
-.markdown-body h3 { font-size: 14.5px; }
+
+.markdown-body h1 {
+  font-size: 17px;
+}
+
+.markdown-body h2 {
+  font-size: 15.5px;
+}
+
+.markdown-body h3 {
+  font-size: 14.5px;
+}
+
 .markdown-body h4,
 .markdown-body h5,
-.markdown-body h6 { font-size: 13.5px; }
+.markdown-body h6 {
+  font-size: 13.5px;
+}
 
 /* ── 列表（标记在内部，缩进一致）── */
 .markdown-body ul,
@@ -1350,13 +1333,16 @@ watch(recentMessages, () => {
   padding-left: 0;
   list-style-position: inside;
 }
+
 .markdown-body li {
   margin: 3px 0;
 }
-.markdown-body li > p {
+
+.markdown-body li>p {
   margin: 2px 0;
   display: inline;
 }
+
 /* 嵌套列表缩进 */
 .markdown-body ul ul,
 .markdown-body ul ol,
@@ -1370,11 +1356,13 @@ watch(recentMessages, () => {
   padding-left: 6px;
   list-style: none;
 }
+
 .markdown-body .task-list-item {
   display: flex;
   align-items: flex-start;
   gap: 6px;
 }
+
 .markdown-body .task-list-item input[type="checkbox"] {
   margin-top: 3px;
   accent-color: var(--accent, #38bdf8);
@@ -1391,6 +1379,7 @@ watch(recentMessages, () => {
   background: #1a1d2e !important;
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
+
 .bubble-user .markdown-body pre {
   background: rgba(0, 0, 0, 0.35) !important;
   border-color: rgba(255, 255, 255, 0.1);
@@ -1404,6 +1393,7 @@ watch(recentMessages, () => {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.1);
 }
+
 .bubble-user .markdown-body code {
   background: rgba(0, 0, 0, 0.2);
 }
@@ -1427,6 +1417,7 @@ watch(recentMessages, () => {
 .markdown-body strong {
   font-weight: 700;
 }
+
 .markdown-body em {
   font-style: italic;
 }
@@ -1439,9 +1430,11 @@ watch(recentMessages, () => {
   opacity: 0.88;
   transition: opacity 0.15s;
 }
+
 .markdown-body a:hover {
   opacity: 1;
 }
+
 .bubble-user .markdown-body a {
   text-decoration-color: rgba(255, 255, 255, 0.5);
 }
@@ -1455,10 +1448,12 @@ watch(recentMessages, () => {
   border-radius: 0 4px 4px 0;
   background: rgba(255, 255, 255, 0.04);
 }
+
 .bubble-user .markdown-body blockquote {
   background: rgba(0, 0, 0, 0.1);
   border-left-color: rgba(255, 255, 255, 0.5);
 }
+
 .markdown-body blockquote p:last-child {
   margin-bottom: 0;
 }
@@ -1480,30 +1475,37 @@ watch(recentMessages, () => {
   display: block;
   overflow-x: auto;
 }
+
 .markdown-body th,
 .markdown-body td {
   padding: 7px 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   text-align: left;
 }
+
 .bubble-assistant .markdown-body th,
 .bubble-assistant .markdown-body td {
   border-color: rgba(255, 255, 255, 0.12);
 }
+
 .bubble-user .markdown-body th,
 .bubble-user .markdown-body td {
   border-color: rgba(255, 255, 255, 0.18);
 }
+
 .markdown-body th {
   font-weight: 650;
   background: rgba(255, 255, 255, 0.07);
 }
+
 .bubble-user .markdown-body th {
   background: rgba(0, 0, 0, 0.15);
 }
+
 .markdown-body tr:nth-child(even) td {
   background: rgba(255, 255, 255, 0.03);
 }
+
 .bubble-user .markdown-body tr:nth-child(even) td {
   background: rgba(0, 0, 0, 0.08);
 }
