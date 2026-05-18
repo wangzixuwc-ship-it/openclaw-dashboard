@@ -822,8 +822,21 @@ export const useAgentStore = defineStore('agent', () => {
           }
           if (t === 'tool_result') {
             const name = String(item.name ?? '')
-            // tool_result 的 content 可能是数组 [{type:'text', text:'...'}]
+            const isError = item.is_error === true
+            // tool_result 的 content 可能是数组 [{type:'text', text:'...'}] 或纯字符串
             const resultContent = item.content
+            if (isError) {
+              if (typeof item.error === 'string' && item.error)
+                return `[⚠️ ${name || '错误'}] ${item.error}`
+              if (typeof resultContent === 'string' && resultContent)
+                return `[⚠️ ${name || '错误'}] ${resultContent}`
+              if (Array.isArray(resultContent)) {
+                const textParts = resultContent
+                  .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
+                  .map((r: any) => r.text)
+                if (textParts.length > 0) return `[⚠️ ${name || '错误'}] ${textParts.join('\n')}`
+              }
+            }
             if (Array.isArray(resultContent)) {
               const textParts = resultContent
                 .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
@@ -873,7 +886,20 @@ export const useAgentStore = defineStore('agent', () => {
           }
           if (t === 'tool_result') {
             const name = String(item.name ?? '')
+            const isError = item.is_error === true
             const resultContent = item.content
+            if (isError) {
+              if (typeof item.error === 'string' && item.error)
+                return `[⚠️ ${name || '错误'}] ${item.error}`
+              if (typeof resultContent === 'string' && resultContent)
+                return `[⚠️ ${name || '错误'}] ${resultContent}`
+              if (Array.isArray(resultContent)) {
+                const textParts = resultContent
+                  .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
+                  .map((r: any) => r.text)
+                if (textParts.length > 0) return `[⚠️ ${name || '错误'}] ${textParts.join('\n')}`
+              }
+            }
             if (Array.isArray(resultContent)) {
               const textParts = resultContent
                 .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')

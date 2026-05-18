@@ -43,13 +43,12 @@
             </div>
           </el-tooltip>
 
-          <!-- Refresh Button -->
+           <!-- Skills Button (REC-005: 替换"刷新"按钮) -->
           <el-button
-            :icon="Refresh"
+            :icon="Briefcase"
             circle
             size="small"
-            @click="refreshAll"
-            :loading="store.loading"
+            @click="skillsDialogVisible = true"
             class="refresh-btn"
           />
         </div>
@@ -244,6 +243,24 @@
       v-model:visible="doctorDialogVisible"
       @refresh="refreshAll"
     />
+
+    <!-- Skills Dialog (REC-005) -->
+    <SkillsDialog v-model:visible="skillsDialogVisible" />
+
+    <!-- REC-011: 加载超时提示 -->
+    <el-alert
+      v-if="loadingHintVisible"
+      title="正在加载，请稍候..."
+      type="info"
+      :closable="false"
+      show-icon
+      class="loading-hint-alert"
+      plain
+    >
+      <template #default>
+        <span>数据加载中（已超过 10 秒），请耐心等待...</span>
+      </template>
+    </el-alert>
   </div>
 </template>
 
@@ -255,10 +272,11 @@ import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
 import TokenDetailDialog from '../components/TokenDetailDialog.vue'
 import VersionDialog from '../components/VersionDialog.vue'
 import GatewayDoctorDialog from '../components/GatewayDoctorDialog.vue'
+import SkillsDialog from '../components/SkillsDialog.vue'
 import { type WorkflowData } from '../data/workflow-steps'
 import {
   Monitor,
-  Refresh,
+  Collection,
   CircleCheck,
   Warning,
   Odometer,
@@ -268,6 +286,7 @@ import {
   Money,
   ArrowRight,
   QuestionFilled,
+  Briefcase
 } from '@element-plus/icons-vue'
 
 // App version from package.json (injected by Vite define)
@@ -333,6 +352,31 @@ const versionDialogVisible = ref(false)
 
 // Gateway Doctor dialog (REC-003)
 const doctorDialogVisible = ref(false)
+
+// Skills dialog (REC-005)
+const skillsDialogVisible = ref(false)
+
+// REC-011: 加载超时提示（加载超过 10s 时显示）
+const loadingHintVisible = ref(false)
+let loadingHintTimer: ReturnType<typeof setTimeout> | null = null
+let loadingCheckTimer: ReturnType<typeof setInterval> | null = null
+
+function checkLoadingHint(): void {
+  if (store.loading) {
+    if (!loadingHintVisible.value && !loadingHintTimer) {
+      loadingHintTimer = setTimeout(() => {
+        loadingHintVisible.value = true
+        loadingHintTimer = null
+      }, 10000)
+    }
+  } else {
+    if (loadingHintTimer) {
+      clearTimeout(loadingHintTimer)
+      loadingHintTimer = null
+    }
+    loadingHintVisible.value = false
+  }
+}
 
 // Stats cards
 const statsCards = computed(() => [
@@ -454,6 +498,9 @@ onMounted(() => {
   // REC-117: 工作流进度持久化 — 每 5 秒轮询
   fetchWorkflowData()
   workflowTimer = setInterval(fetchWorkflowData, 5000)
+  // REC-011: 加载超时提示 — 每 1 秒检查
+  checkLoadingHint()
+  loadingCheckTimer = setInterval(checkLoadingHint, 1000)
 })
 
 onUnmounted(() => {
@@ -464,6 +511,15 @@ onUnmounted(() => {
   if (workflowTimer) {
     clearInterval(workflowTimer)
     workflowTimer = null
+  }
+  // REC-011: 清理加载提示定时器
+  if (loadingHintTimer) {
+    clearTimeout(loadingHintTimer)
+    loadingHintTimer = null
+  }
+  if (loadingCheckTimer) {
+    clearInterval(loadingCheckTimer)
+    loadingCheckTimer = null
   }
 })
 </script>
@@ -609,6 +665,21 @@ onUnmounted(() => {
 
 .refresh-btn {
   flex-shrink: 0;
+}
+
+.loading-hint-alert {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  min-width: 280px;
+  animation: loadingHintFadeIn 0.3s ease;
+}
+
+@keyframes loadingHintFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* ==================== STATS SECTION ==================== */

@@ -1080,6 +1080,222 @@ function stopAutoScan() {
 }
 
 // ============================================
+// Tasks API — 当前任务进度
+// ============================================
+
+// .openclaw 目录（项目级）
+const PROJECT_OPENCLAW_DIR = path.join(__dirname, '..', '.openclaw')
+
+/**
+ * 读取 REC-STATUS.json 和 REC-TASK-DOING.json，获取当前任务数据
+ */
+async function getCurrentTaskData() {
+  const recStatusPath = path.join(PROJECT_OPENCLAW_DIR, 'REC-STATUS.json')
+  const recDoingPath = path.join(PROJECT_OPENCLAW_DIR, 'REC-TASK-DOING.json')
+
+  let recStatus = { currentTask: null, status: 'idle', phase: null, agent: null, lastUpdate: null }
+  let recDoing = { tasks: [], pendingTasks: [] }
+
+  try {
+    const content = await fs.readFile(recStatusPath, 'utf-8')
+    recStatus = JSON.parse(content)
+  } catch (e) { /* 文件不存在或解析失败 */ }
+
+  try {
+    const content = await fs.readFile(recDoingPath, 'utf-8')
+    recDoing = JSON.parse(content)
+  } catch (e) { /* 文件不存在或解析失败 */ }
+
+  // 合并：以 recDoing 中对应任务的信息补充
+  const taskId = recStatus.currentTask
+  let taskInfo = null
+  if (taskId) {
+    taskInfo = recDoing.tasks.find(t => t.rec === taskId) || null
+  }
+
+  return {
+    taskId: taskId,
+    status: recStatus.status,
+    phase: taskInfo?.phase || recStatus.phase,
+    agent: taskInfo?.agent || recStatus.agent,
+    lastUpdate: taskInfo?.lastUpdate || recStatus.lastUpdate,
+    dispatchedAt: taskInfo?.dispatchedAt || null,
+    description: taskInfo?.description || null,
+    pendingTasks: recDoing.pendingTasks || recStatus.pendingTasks || []
+  }
+}
+
+/**
+ * 扫描 .openclaw 目录下 REC-{taskId}-* 文件，检测涉及的 agent 和阶段完成度
+ */
+async function scanTaskProgress(taskId) {
+  try {
+    const files = await fs.readdir(PROJECT_OPENCLAW_DIR)
+    const prefix = `${taskId}-`
+
+    // 检测阶段文件是否存在
+    let hasAnalyze = false, hasExecute = false, hasAudit = false, hasTest = false
+
+    // 检测是否有多 agent（通过文件名中的 agent 前缀识别）
+    const multiAgentFiles = {}
+
+    for (const file of files) {
+      if (!file.startsWith(prefix)) continue
+
+      // 识别 agent 前缀：REC-XXX-backend-* 或 REC-XXX-frontend-*
+      const agentMatch = file.match(/^REC-\d+-(backend|frontend)-/)
+      const agentName = agentMatch ? agentMatch[1] : null
+
+      // 有 agent 前缀的文件：按 agent 分类
+      if (agentName) {
+        if (!multiAgentFiles[agentName]) multiAgentFiles[agentName] = []
+        multiAgentFiles[agentName].push(file)
+        continue
+      }
+
+      // 前端专属文件（检测前端 agent）— 不参与通用阶段标志
+      if (file.includes('前端')) {
+        if (!multiAgentFiles['frontend']) multiAgentFiles['frontend'] = []
+        multiAgentFiles['frontend'].push(file)
+        continue
+      }
+
+      // 无 agent 前缀的通用阶段文件（backend 拥有）
+      if (file.includes('分析')) hasAnalyze = true
+      if (file.includes('修复') || (file.match(/\.md$/i) && file.includes('fix'))) hasExecute = true
+      if (file.includes('代码审计')) hasAudit = true
+      if (file.includes('测试')) hasTest = true
+    }
+
+    // 构建 agent 列表
+    const allAgents = Object.keys(multiAgentFiles)
+
+    // 如果有通用阶段文件，添加 backend agent
+    const hasAnyStageFile = hasAnalyze || hasExecute || hasAudit || hasTest
+    if (!allAgents.includes('backend') && hasAnyStageFile) {
+      allAgents.unshift('backend')
+    }
+
+    // 如果没有 agent 但无阶段文件，返回空
+    if (allAgents.length === 0 && !hasAnyStageFile) {
+      return { agents: [], error: null }
+    }
+
+    const totalPhases = 4
+    const agents = allAgents.map(name => {
+      const agentFiles = multiAgentFiles[name] || []
+
+      let analyze = false
+      let execute = false
+      let audit = false
+      let test = false
+
+      // 如果有多 agent 文件，按 agent 分类计算
+      if (agentFiles.length > 0) {
+        analyze = agentFiles.some(f => f.includes('分析'))
+        execute = agentFiles.some(f => f.includes('修复') || f.includes('fix'))
+        audit = agentFiles.some(f => f.includes('代码审计') || f.includes('audit'))
+        test = agentFiles.some(f => f.includes('测试') || f.includes('test'))
+      } else if (name === 'backend') {
+        // backend 无专属文件时，继承通用文件标志（backend 拥有通用文件）
+        analyze = hasAnalyze
+        execute = hasExecute
+        audit = hasAudit
+        test = hasTest
+      }
+
+      const completedCount = [analyze, execute, audit, test].filter(Boolean).length
+      const progress = Math.round((completedCount / totalPhases) * 100)
+
+      let currentStage = 'completed'
+      if (!analyze) currentStage = 'analyze'
+      else if (!execute) currentStage = 'execute'
+      else if (!audit) currentStage = 'audit'
+      else if (!test) currentStage = 'test'
+
+      const status = currentStage === 'completed' ? '已完成' : '执行中'
+
+      return {
+        name,
+        status,
+        currentStage: currentStage === 'completed' ? null : currentStage,
+        _analyze: analyze,
+        _execute: execute,
+        _audit: audit,
+        _test: test
+      }
+    })
+
+    return { agents, error: null }
+  } catch (e) {
+    return { agents: [], error: e.message }
+  }
+}
+
+/**
+ * 获取当前任务进度
+ * @param {string} taskId - 可选，指定任务 ID（默认从 REC-STATUS.json 读取）
+ */
+async function getCurrentTaskProgress(taskId) {
+  const data = await getCurrentTaskData()
+  const targetTaskId = taskId || data.taskId
+
+  if (!targetTaskId) {
+    return {
+      taskId: null,
+      projectName: null,
+      taskName: null,
+      progress: 0,
+      currentStage: null,
+      totalStages: 0,
+      agents: [],
+      startedAt: null,
+      runningMinutes: 0
+    }
+  }
+
+  const { agents } = await scanTaskProgress(targetTaskId)
+
+  // 计算整体进度（取所有 agent 平均进度）
+  let overallProgress = 0
+  let overallStage = null
+  if (agents.length > 0) {
+    let totalPct = 0
+    let firstRunning = null
+    for (const a of agents) {
+      const cnt = [a._analyze, a._execute, a._audit, a._test].filter(Boolean).length
+      totalPct += cnt * 25
+      if (!firstRunning && a.currentStage) firstRunning = a.currentStage
+    }
+    overallProgress = Math.round(totalPct / agents.length)
+    overallStage = firstRunning
+  }
+
+  // 开始时间
+  const startedAt = data.dispatchedAt || data.lastUpdate || new Date().toISOString()
+  const startedMs = new Date(startedAt).getTime()
+  const runningMinutes = Math.max(0, Math.round((Date.now() - startedMs) / 60000))
+
+  // 查找任务描述
+  const taskDescription = data.taskId === targetTaskId ? data.description : null
+
+  return {
+    taskId: targetTaskId,
+    projectName: 'OpenClaw Dashboard',
+    taskName: taskDescription || targetTaskId,
+    progress: overallProgress,
+    currentStage: overallStage,
+    totalStages: 4,
+    agents: agents.map(a => {
+      const label = `${a.name}(${a.status})`
+      return a.currentStage ? `${label}[${a.currentStage}]` : label
+    }),
+    startedAt,
+    runningMinutes
+  }
+}
+
+// ============================================
 // HTTP Server
 // ============================================
 
@@ -2015,6 +2231,240 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // GET /api/tasks/current — 获取当前任务进度
+  // ============================================
+
+  if (pathname === '/api/tasks/current' && req.method === 'GET') {
+    // 5 秒超时
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('GET /api/tasks/current timeout after 5s')), 5000)
+    })
+
+    const handler = async () => {
+      try {
+        const params = url.searchParams
+        const overrideTaskId = params.get('taskId')
+
+        // 支持 ?taskId= 查询参数，无参数时读取 REC-STATUS.json
+        const progress = await getCurrentTaskProgress(overrideTaskId || null)
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(progress))
+      } catch (error) {
+        console.error('[Tasks] Error:', error.message)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          taskId: null,
+          projectName: null,
+          taskName: null,
+          progress: 0,
+          currentStage: null,
+          totalStages: 0,
+          agents: [],
+          startedAt: null,
+          runningMinutes: 0
+        }))
+      }
+    }
+
+    Promise.race([handler(), timeoutPromise]).catch(err => {
+      console.error('[Tasks] Route handler error:', err.message)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        taskId: null,
+        projectName: null,
+        taskName: null,
+        progress: 0,
+        currentStage: null,
+        totalStages: 0,
+        agents: [],
+        startedAt: null,
+        runningMinutes: 0
+      }))
+    })
+    return
+  }
+
+  // ============================================
+  // GET /api/system/skills — 获取技能列表
+  // ============================================
+
+  if (pathname === '/api/system/skills' && req.method === 'GET') {
+    const isWindows = os.platform() === 'win32'
+    const command = isWindows ? 'openclaw.cmd' : 'openclaw'
+    const SKILLS_TIMEOUT = 60000 // 60 秒超时
+
+    console.log(`[Skills] 执行: ${command} skills list --json`)
+
+    const result = await runCommand(command, ['skills', 'list', '--json'], SKILLS_TIMEOUT)
+
+    if (result.success) {
+      try {
+        // openclaw 在 Windows 上将 JSON 输出到 stderr（含配置警告）
+        // 优先从 stdout 取，为空则从 stderr 取，跳过非 JSON 前缀
+        let rawOutput = result.stdout || result.stderr || ''
+        const jsonStart = rawOutput.indexOf('{')
+        const jsonStr = jsonStart >= 0 ? rawOutput.slice(jsonStart) : rawOutput
+        const parsed = JSON.parse(jsonStr)
+        const skills = parsed.skills || []
+
+        // 为每个技能增强 installed 和 enabled 状态字段
+        const skillsWithStatus = skills.map(skill => ({
+          ...skill,
+          installed: (() => {
+            const m = skill.missing || {}
+            return (m.bins || []).length === 0
+              && (m.anyBins || []).length === 0
+              && (m.env || []).length === 0
+              && (m.config || []).length === 0
+              && (m.os || []).length === 0
+          })(),
+          enabled: skill.disabled !== true
+        }))
+
+        const ready = skillsWithStatus.filter(s => s.eligible).length
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          total: skillsWithStatus.length,
+          ready: ready,
+          skills: skillsWithStatus,
+          workspaceDir: parsed.workspaceDir,
+          managedSkillsDir: parsed.managedSkillsDir
+        }))
+      } catch (parseError) {
+        console.error('[Skills] JSON 解析失败:', parseError.message)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: false,
+          error: '解析技能列表失败',
+          raw: (result.stdout || result.stderr || '').substring(0, 200)
+        }))
+      }
+    } else {
+      console.error(`[Skills] 命令执行失败: ${result.error}`)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        success: false,
+        error: result.error,
+        stderr: result.stderr || ''
+      }))
+    }
+    return
+  }
+
+  // ============================================
+  // POST /api/system/skills/install — 安装技能
+  // ============================================
+
+  if (pathname === '/api/system/skills/install' && req.method === 'POST') {
+    let body = ''
+    let bodyExceeded = false
+    const MAX_BODY_SIZE = 1024 // 1KB 限制
+
+    req.on('data', chunk => {
+      body += chunk.toString()
+      if (body.length > MAX_BODY_SIZE && !bodyExceeded) {
+        bodyExceeded = true
+        req.destroy() // H-2 残留修复：立即终止请求，不再入内存
+      }
+    })
+    req.on('end', async () => {
+      if (bodyExceeded) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: false,
+          message: '请求体过大（限制 1KB）',
+          stdout: '',
+          stderr: ''
+        }))
+        return
+      }
+      try {
+        const input = JSON.parse(body)
+        const skillName = input?.name
+
+        // 输入验证：类型检查 + 非空 + 白名单 + 长度 + 路径遍历防护
+        if (!skillName || typeof skillName !== 'string' || !skillName.trim()) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: false,
+            message: '缺少技能名称参数',
+            stdout: '',
+            stderr: ''
+          }))
+          return
+        }
+
+        const trimmed = skillName.trim()
+
+        // 长度上限 100 字符
+        if (trimmed.length > 100) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: false,
+            message: '技能名称过长（限制 100 字符）',
+            stdout: '',
+            stderr: ''
+          }))
+          return
+        }
+
+        // 路径遍历防护：禁止包含 ..
+        if (/(\.\.[\\/]|^\.+$)/.test(trimmed)) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: false,
+            message: '技能名称包含非法路径',
+            stdout: '',
+            stderr: ''
+          }))
+          return
+        }
+
+        // 扩展白名单：支持 @scope/package 格式，允许字母、数字、连字符、下划线、@ / -
+        if (!/^[a-zA-Z0-9_@/.-]+$/.test(trimmed)) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: false,
+            message: '技能名称包含非法字符',
+            stdout: '',
+            stderr: ''
+          }))
+          return
+        }
+
+        const isWindows = os.platform() === 'win32'
+        const command = isWindows ? 'npx.cmd' : 'npx'
+        const INSTALL_TIMEOUT = 60000 // 60 秒超时
+
+        console.log(`[Skills Install] 执行: ${command} clawhub install ${trimmed}`)
+
+        const result = await runCommand(command, ['clawhub', 'install', trimmed], INSTALL_TIMEOUT)
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: result.success,
+          message: result.success ? `技能 ${trimmed} 安装成功` : `技能 ${trimmed} 安装失败`,
+          stdout: result.stdout || '',
+          stderr: result.stderr || ''
+        }))
+      } catch (parseError) {
+        console.error('[Skills Install] 请求解析失败:', parseError.message)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: false,
+          message: '请求参数格式错误',
+          stdout: '',
+          stderr: parseError.message
+        }))
+      }
+    })
+    return
+  }
+
+  // ============================================
   // POST /api/system/doctor — 执行 openclaw doctor 诊断
   // ============================================
 
@@ -2075,6 +2525,9 @@ server.listen(PORT, () => {
   console.log('  GET  /api/system/versions       - 获取版本列表')
   console.log('  POST /api/system/sync-versions  - 同步版本列表')
   console.log('  POST /api/system/switch-version - 切换版本')
+  console.log('  GET  /api/tasks/current           - 获取当前任务进度')
+  console.log('  GET  /api/system/skills           - 获取技能列表')
+  console.log('  POST /api/system/skills/install   - 安装技能')
   console.log('  POST /api/system/doctor          - 执行 openclaw doctor 诊断')
   console.log('  POST /reset                     - 重置 Agent')
   console.log('  POST /api/upload-image           - 图片上传 (base64, ≤5MB)')

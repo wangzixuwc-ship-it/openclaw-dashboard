@@ -1,5 +1,24 @@
 import axios from 'axios'
 
+/** 技能信息接口 (REC-005) */
+export interface SkillInfo {
+  name: string
+  description: string
+  icon?: string
+  status?: string
+  installed?: boolean
+  enabled?: boolean
+  [key: string]: unknown
+}
+
+/** 技能列表响应接口 (REC-005) */
+export interface SkillsResponse {
+  success: boolean
+  total: number
+  ready: number
+  skills: SkillInfo[]
+}
+
 /**
  * 获取系统版本号 (REC-066)
  * 后端接口: GET /api/system/version → 端口 31002
@@ -43,5 +62,50 @@ export async function runDoctor(): Promise<DoctorResult | null> {
   } catch (e: unknown) {
     console.error('[System] runDoctor error:', e)
     return null
+  }
+}
+
+/**
+ * 获取 OpenClaw 技能列表 (REC-005)
+ * 后端接口: GET /api/system/skills → 端口 31002
+ * 返回: { success, total, ready, skills: [{ name, description, icon, status, ... }] }
+ */
+export async function getSkills(): Promise<SkillsResponse | null> {
+  try {
+    const url = import.meta.env.DEV
+      ? '/api/system/skills'
+      : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31002'}/api/system/skills`
+    const resp = await axios.get(url, { timeout: 15000 })
+    return resp.data as SkillsResponse
+  } catch (e: unknown) {
+    console.error('[System] getSkills error:', e)
+    return null
+  }
+}
+
+/**
+ * 安装技能 (REC-012 第二阶段)
+ * 后端接口: POST /api/system/skills/install → 端口 31002
+ * 请求体: { name: string }
+ * 返回: { success: boolean, message: string, stdout?: string, stderr?: string }
+ */
+export interface InstallSkillResult {
+  success: boolean
+  message: string
+  stdout?: string
+  stderr?: string
+}
+
+export async function installSkill(name: string): Promise<InstallSkillResult | null> {
+  try {
+    const url = import.meta.env.DEV
+      ? '/api/system/skills/install'
+      : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31002'}/api/system/skills/install`
+    const resp = await axios.post(url, { name }, { timeout: 60000 })
+    return resp.data as InstallSkillResult
+  } catch (e: unknown) {
+    console.error('[System] installSkill error:', e)
+    const message = (e instanceof Error ? e.message : '安装失败')
+    return { success: false, message }
   }
 }

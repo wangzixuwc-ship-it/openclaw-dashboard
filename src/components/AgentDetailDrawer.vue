@@ -50,6 +50,7 @@
                       >
                         <div class="bubble-label" v-if="msg.contentType === 'thinking'">💭 思考</div>
                         <div class="bubble-label" v-else-if="msg.contentType === 'tool_use'">🔧 工具调用</div>
+                        <div class="bubble-label" v-else-if="msg.contentType === 'tool_result' && msg.isError">⚠️ 工具错误</div>
                         <div class="bubble-label" v-else-if="msg.contentType === 'tool_result'">🔧 工具结果</div>
                         <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
                       </div>
@@ -230,6 +231,7 @@ interface MessageItem {
   role: string
   contentType: string
   content: string
+  isError?: boolean
 }
 
 const props = defineProps<{
@@ -386,7 +388,10 @@ function bubbleClass(msg: MessageItem): string {
   if (msg.role === 'user') return 'bubble-user'
   if (msg.contentType === 'image' || msg.contentType === 'file') return 'bubble-media'
   if (msg.contentType === 'thinking') return 'bubble-thinking'
-  if (msg.contentType === 'tool_use' || msg.contentType === 'tool_result') return 'bubble-tool'
+  if (msg.contentType === 'tool_use' || msg.contentType === 'tool_result') {
+    if (msg.isError) return 'bubble-tool-error'
+    return 'bubble-tool'
+  }
   return 'bubble-assistant'
 }
 
@@ -523,10 +528,22 @@ function splitContentParts(content: unknown): { contentType: string; content: st
       }
       if (type === 'tool_result') {
         const name = String(item.name ?? '')
-        // tool_result 的 content 可能是数组 [{type:'text', text:'...'}]
+        const isError = item.is_error === true
+        // tool_result 的 content 可能是数组 [{type:'text', text:'...'}] 或纯字符串
         const resultContent = item.content
         let text = ''
-        if (Array.isArray(resultContent)) {
+        if (isError) {
+          // 优先从 error 字段获取错误信息
+          if (typeof item.error === 'string' && item.error) text = item.error
+          else if (typeof resultContent === 'string' && resultContent) text = resultContent
+          else if (Array.isArray(resultContent)) {
+            const textParts = resultContent
+              .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
+              .map((r: any) => r.text)
+            if (textParts.length > 0) text = textParts.join('\n')
+          }
+        }
+        if (!text && Array.isArray(resultContent)) {
           const textParts = resultContent
             .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
             .map((r: any) => r.text)
@@ -535,7 +552,7 @@ function splitContentParts(content: unknown): { contentType: string; content: st
         if (!text && typeof item.text === 'string' && item.text) text = item.text
         if (!text && name) text = `[${name}]`
         if (!text) text = '[工具结果]'
-        return { contentType: 'tool_result', content: text }
+        return { contentType: 'tool_result', content: text, isError }
       }
       // OpenAI 风格的图片：{ type: 'image_url', image_url: { url } }
       if (type === 'image_url') {
@@ -1100,6 +1117,15 @@ watch(recentMessages, () => {
   color: #e2e8f0;
   border-bottom-left-radius: 4px;
   border-left: 3px solid #42a5f5;
+  font-size: 12.5px;
+}
+
+/* 工具错误：红色左边框，半透明背景 */
+.bubble-tool-error {
+  background: rgba(244, 67, 54, 0.08);
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+  border-left: 3px solid #f44336;
   font-size: 12.5px;
 }
 
