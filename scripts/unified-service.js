@@ -2025,7 +2025,7 @@ const server = http.createServer(async (req, res) => {
 
     console.log(`[Doctor] 执行诊断: ${command} doctor`)
 
-    const result = await runCommand(command, ['doctor'], DOCTOR_TIMEOUT)
+    const result = await runCommand(command, ['doctor','--fix'], DOCTOR_TIMEOUT)
 
     if (result.success) {
       res.writeHead(200, { 'Content-Type': 'application/json' })

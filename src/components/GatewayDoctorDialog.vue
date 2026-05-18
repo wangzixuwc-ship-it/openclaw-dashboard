@@ -53,19 +53,6 @@
 
     <!-- 空状态 -->
     <el-empty v-if="!running && !result" description="暂无诊断结果" :image-size="60" />
-
-    <template #footer>
-      <div class="dialog-footer">
-        <el-button @click="dialogVisible = false">关闭</el-button>
-        <el-button
-          v-if="done"
-          type="primary"
-          @click="handleRefreshAndClose"
-        >
-          刷新状态并关闭
-        </el-button>
-      </div>
-    </template>
   </el-dialog>
 </template>
 
@@ -305,7 +292,7 @@ function handleRefreshAndClose(): void {
 .output-content {
   margin: 0;
   padding: 14px 16px;
-  max-height: 400px;
+  max-height: 300px;
   overflow-y: auto;
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   font-size: 13px;

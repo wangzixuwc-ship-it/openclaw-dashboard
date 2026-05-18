@@ -21,29 +21,13 @@
             <span class="indicator-value">{{ store.gatewayVersion || '未知' }}</span>
           </div>
 
-          <!-- Gateway Health -->
-          <div class="indicator" :class="healthClass">
+          <!-- Gateway Health (REC-004: 布局合并，保持原有样式) -->
+          <div class="indicator" :class="healthClass" @click="doctorDialogVisible = true">
             <el-icon :size="14"><component :is="healthIcon" /></el-icon>
             <span class="indicator-label">网关</span>
-            <span class="indicator-value">{{ healthDisplay }}</span>
+            <span>{{ healthDisplay }}</span>
+            <span v-if="store.healthStatus === 'unhealthy'"> 点击诊断</span>
           </div>
-
-          <!-- Gateway Doctor Button (REC-003) -->
-          <el-tooltip
-            v-if="store.healthStatus === 'unhealthy'"
-            content="执行 openclaw doctor 诊断并尝试修复网关连接"
-            placement="bottom"
-          >
-            <el-button
-              type="danger"
-              size="small"
-              :icon="Warning"
-              @click="doctorDialogVisible = true"
-              class="doctor-btn"
-            >
-              修复网关连接
-            </el-button>
-          </el-tooltip>
 
           <!-- GPU VRAM Usage (REC-091) -->
           <el-tooltip
@@ -571,6 +555,7 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-color);
   transition: all 0.3s;
+  cursor: pointer;
 }
 
 .indicator:hover {
@@ -605,7 +590,6 @@ onUnmounted(() => {
 .indicator-version .indicator-value {
   color: #90caf9;
   font-family: 'Cascadia Code', 'Fira Code', monospace;
-  font-size: 11px;
 }
 
 .indicator-gpu {
@@ -621,7 +605,6 @@ onUnmounted(() => {
 .indicator-gpu .indicator-value {
   color: #e1bee7;
   font-family: 'Cascadia Code', 'Fira Code', monospace;
-  font-size: 11px;
 }
 
 .refresh-btn {
