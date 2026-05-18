@@ -28,6 +28,23 @@
             <span class="indicator-value">{{ healthDisplay }}</span>
           </div>
 
+          <!-- Gateway Doctor Button (REC-003) -->
+          <el-tooltip
+            v-if="store.healthStatus === 'unhealthy'"
+            content="执行 openclaw doctor 诊断并尝试修复网关连接"
+            placement="bottom"
+          >
+            <el-button
+              type="danger"
+              size="small"
+              :icon="Warning"
+              @click="doctorDialogVisible = true"
+              class="doctor-btn"
+            >
+              修复网关连接
+            </el-button>
+          </el-tooltip>
+
           <!-- GPU VRAM Usage (REC-091) -->
           <el-tooltip
             v-if="store.gpuVramPercentage !== null && store.gpuVramPercentage !== undefined"
@@ -237,6 +254,12 @@
 
     <!-- Version Dialog (REC-068) -->
     <VersionDialog v-model:visible="versionDialogVisible" :current-version="store.gatewayVersion || ''" />
+
+    <!-- Gateway Doctor Dialog (REC-003) -->
+    <GatewayDoctorDialog
+      v-model:visible="doctorDialogVisible"
+      @refresh="refreshAll"
+    />
   </div>
 </template>
 
@@ -247,6 +270,7 @@ import AgentCard from '../components/AgentCard.vue'
 import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
 import TokenDetailDialog from '../components/TokenDetailDialog.vue'
 import VersionDialog from '../components/VersionDialog.vue'
+import GatewayDoctorDialog from '../components/GatewayDoctorDialog.vue'
 import { type WorkflowData } from '../data/workflow-steps'
 import {
   Monitor,
@@ -322,6 +346,9 @@ const tokenDetailVisible = ref(false)
 
 // Version dialog
 const versionDialogVisible = ref(false)
+
+// Gateway Doctor dialog (REC-003)
+const doctorDialogVisible = ref(false)
 
 // Stats cards
 const statsCards = computed(() => [

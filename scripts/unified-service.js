@@ -7,7 +7,6 @@
 import http from 'http'
 import https from 'https'
 import fs from 'fs/promises'
-import fsSync from 'fs'
 import path from 'path'
 import os from 'os'
 import { spawn } from 'child_process'
@@ -217,8 +216,12 @@ function fetchWithTimeout(url, timeoutMs) {
  */
 function runCommand(command, args, timeoutMs) {
   return new Promise((resolve) => {
-    const isWindows = os.platform() === 'win32'
-    const child = spawn(command, args, { shell: isWindows })
+    // 修复 R-1/R-2/R-3: 统一使用 shell，确保 PATH 和环境变量正确
+    const child = spawn(command, args, {
+      shell: true,
+      env: { ...process.env },
+      windowsHide: true
+    })
 
     let stdout = ''
     let stderr = ''
@@ -252,32 +255,89 @@ function runCommand(command, args, timeoutMs) {
 
 /**
  * 切换 OpenClaw 版本：串行执行 npm install → gateway restart
+ * 支持 Windows / Linux / macOS 跨平台
  */
 async function switchOpenClawVersion(version) {
   const INSTALL_TIMEOUT = 1200000  // 安装 20 分钟超时
-  const RESTART_TIMEOUT = 30000   // 重启 30 秒超时
+  const RESTART_TIMEOUT = 60000   // 重启 60 秒超时
+  const platform = os.platform()  // win32 | linux | darwin
 
-  console.log(`[Switch Version] 开始安装 openclaw@${version}`)
+  console.log(`[Switch Version] 开始安装 openclaw@${version}（平台：${platform}）`)
 
-  // Step 1: npm install -g
-  const installResult = await runCommand(
-    'npm',
-    ['install', '-g', `openclaw@${version}`, '--registry=https://repo.huaweicloud.com/repository/npm/'],
-    INSTALL_TIMEOUT
-  )
+  // Step 1: npm install -g（Linux/macOS 可能需要 sudo）
+  const isWindows = platform === 'win32'
+  const isLinux = platform === 'linux'
+  const isMacOS = platform === 'darwin'
+
+  // 构建 npm install 命令
+  let installCommand = 'npm'
+  let installArgs = ['install', '-g', `openclaw@${version}`, '--registry=https://repo.huaweicloud.com/repository/npm/']
+
+  // Linux 系统：检测是否需要 sudo（方案 A：非 root + 系统级 prefix → 返回手动操作引导）
+  if (isLinux) {
+    // 检查 npm 全局前缀
+    const prefixCheck = await runCommand('npm', ['prefix', '-g'], 5000)
+    const rawPrefix = prefixCheck.stdout?.trim()
+    const npmPrefix = rawPrefix?.replace(/\/$/, '') // 去除尾部斜杠
+
+    // 如果 prefix 是 /usr/local 或 /usr，通常需要 root 权限
+    if (npmPrefix && /^\/usr(\/local)?$/.test(npmPrefix)) {
+      // 检测当前用户是否为 root
+      const uidCheck = await runCommand('id', ['-u'], 5000)
+      const uid = uidCheck.stdout?.trim()
+      if (uid !== '0') {
+        // 非 root 用户 + 系统级 npm 前缀 → 无法通过 Web API 自动安装（sudo 需要 TTY）
+        console.log(`[Switch Version] 非 root 用户(u=${uid}) + 系统 prefix(${npmPrefix})，返回手动引导`)
+        return {
+          success: false,
+          error: `需要 root 权限安装全局包。请手动执行：\n  sudo npm install -g openclaw@${version}\n  sudo openclaw gateway restart`,
+          requiresManualAction: true,
+          manualCommands: [
+            `sudo npm install -g openclaw@${version} --registry=https://repo.huaweicloud.com/repository/npm/`,
+            'sudo openclaw gateway restart'
+          ]
+        }
+      }
+      // root 用户，直接 npm install（无需 sudo）
+      console.log(`[Switch Version] root 用户，直接执行 npm install`)
+    }
+    // nvm/fnm 等用户级 prefix 不需要 sudo，直接执行
+  }
+
+  const installResult = await runCommand(installCommand, installArgs, INSTALL_TIMEOUT)
 
   if (!installResult.success) {
     console.error(`[Switch Version] 安装失败: ${installResult.error}`)
+    // 如果是权限问题，提示用户手动执行
+    if (installResult.stderr && /EACCES|permission denied|EPERM/i.test(installResult.stderr)) {
+      return { 
+        success: false, 
+        error: `权限不足，请手动执行：sudo npm install -g openclaw@${version}`,
+        stdout: installResult.stdout, 
+        stderr: installResult.stderr 
+      }
+    }
     return { success: false, error: `安装失败: ${installResult.error}`, stdout: installResult.stdout, stderr: installResult.stderr }
   }
 
   console.log(`[Switch Version] 安装成功，开始重启网关`)
 
-  // Step 2: openclaw gateway restart
-  const restartResult = await runCommand('openclaw', ['gateway', 'restart'], RESTART_TIMEOUT)
+  // Step 2: openclaw gateway restart（跨平台命令兼容）
+  let restartCommand  = 'openclaw'
+
+  const restartResult = await runCommand(restartCommand, ['gateway', 'restart'], RESTART_TIMEOUT)
 
   if (!restartResult.success) {
     console.error(`[Switch Version] 网关重启失败: ${restartResult.error}`)
+    // 如果命令不存在，给出友好提示
+    if (restartResult.error && /not found|ENOENT/i.test(restartResult.error)) {
+      return { 
+        success: false, 
+        error: `openclaw 命令未找到，请确认已正确安装或手动重启网关`,
+        stdout: restartResult.stdout, 
+        stderr: restartResult.stderr 
+      }
+    }
     return { success: false, error: `安装成功但网关重启失败: ${restartResult.error}`, stdout: restartResult.stdout, stderr: restartResult.stderr }
   }
 
@@ -587,14 +647,25 @@ async function getGpuVram() {
     return getMacOSGpuInfo()
   }
 
-  return runNvidiaSmi()
+  // Linux/Windows: 尝试 nvidia-smi，无 NVIDIA GPU 时不抛出异常
+  try {
+    return await runNvidiaSmi()
+  } catch (e) {
+    console.log('[GPU] nvidia-smi 不可用:', e.message)
+    return { usedPct: null, nvidiaSmiAvailable: false }
+  }
 }
 
 function getMacOSGpuInfo() {
   return new Promise((resolve) => {
-    const child = spawn('system_profiler', ['SPDisplaysDataType'], {
-      timeout: 10000
-    })
+    // 修复 R-10: spawn 选项不支持 timeout，改用 setTimeout + child.kill()
+    const child = spawn('system_profiler', ['SPDisplaysDataType'])
+
+    const timeoutId = setTimeout(() => {
+      console.log('[GPU] macOS system_profiler 超时，强制终止')
+      child.kill('SIGKILL')
+      resolve({ usedPct: null })
+    }, 10000)
 
     let stdout = ''
 
@@ -603,6 +674,7 @@ function getMacOSGpuInfo() {
     })
 
     child.on('close', (code) => {
+      clearTimeout(timeoutId)
       if (code !== 0) {
         resolve({ usedPct: null })
         return
@@ -625,7 +697,10 @@ function getMacOSGpuInfo() {
       resolve({ usedPct: null, totalMb, gpuName: gpuName || undefined })
     })
 
-    child.on('error', () => resolve({ usedPct: null }))
+    child.on('error', () => {
+      clearTimeout(timeoutId)
+      resolve({ usedPct: null })
+    })
   })
 }
 
@@ -650,10 +725,14 @@ function runNvidiaSmi() {
       ]
     }
 
-    const child = spawn(command, args, {
-      shell: isWindows,
-      timeout: 10000
-    })
+    // 修复 R-13: spawn 选项不支持 timeout，改用 setTimeout + child.kill()
+    const child = spawn(command, args, { shell: isWindows })
+
+    const timeoutId = setTimeout(() => {
+      console.log('[GPU] nvidia-smi 超时，强制终止')
+      child.kill('SIGKILL')
+      reject(new Error('nvidia-smi timeout after 10s'))
+    }, 10000)
 
     let stdout = ''
     let stderr = ''
@@ -667,6 +746,7 @@ function runNvidiaSmi() {
     })
 
     child.on('close', (code) => {
+      clearTimeout(timeoutId)
       if (code === 0) {
         resolve(stdout.trim())
       } else {
@@ -674,7 +754,10 @@ function runNvidiaSmi() {
       }
     })
 
-    child.on('error', (err) => reject(err))
+    child.on('error', (err) => {
+      clearTimeout(timeoutId)
+      reject(err)
+    })
   })
 }
 
@@ -726,9 +809,19 @@ function resetAgent(agentId) {
     console.log(`[执行] ${command} ${args.join(' ')}`)
 
     const child = spawn(command, args, {
-      shell: isWindows,
-      timeout: 30000
+      shell: true,
+      env: { ...process.env },
+      windowsHide: true
     })
+
+    const timeoutId = setTimeout(() => {
+      child.kill('SIGKILL')
+      resolve({
+        success: false,
+        agentId,
+        error: '重置超时（30秒）'
+      })
+    }, 30000)
 
     let stdout = ''
     let stderr = ''
@@ -742,6 +835,7 @@ function resetAgent(agentId) {
     })
 
     child.on('close', (code) => {
+      clearTimeout(timeoutId)
       if (code === 0) {
         console.log(`[成功] Agent ${agentId} 重置成功`)
         resolve({
@@ -763,6 +857,7 @@ function resetAgent(agentId) {
     })
 
     child.on('error', (err) => {
+      clearTimeout(timeoutId)
       console.error(`[错误] 执行命令失败：${err.message}`)
       resolve({
         success: false,
@@ -1151,7 +1246,18 @@ const server = http.createServer(async (req, res) => {
       const command = isWindows ? 'openclaw.cmd' : 'openclaw'
       const args = ['-v']
 
-      const child = spawn(command, args, { shell: isWindows, timeout: 10000 })
+      const child = spawn(command, args, {
+        shell: true,
+        env: { ...process.env },
+        windowsHide: true
+      })
+
+      const timeoutId = setTimeout(() => {
+        child.kill('SIGKILL')
+        console.error('[System Version] 获取版本超时（10秒）')
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ version: 'unknown', error: 'timeout after 10s' }))
+      }, 10000)
 
       let stdout = ''
       let stderr = ''
@@ -1160,6 +1266,7 @@ const server = http.createServer(async (req, res) => {
       child.stderr.on('data', (data) => { stderr += data.toString() })
 
       child.on('close', (code) => {
+        clearTimeout(timeoutId)
         if (code === 0) {
           const match = stdout.match(/(\d{4}\.\d+\.\d+)/)
           const version = match ? match[1] : 'unknown'
@@ -1174,6 +1281,7 @@ const server = http.createServer(async (req, res) => {
       })
 
       child.on('error', (err) => {
+        clearTimeout(timeoutId)
         console.error(`[System Version] Spawn error: ${err.message}`)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ version: 'unknown', error: err.message }))
@@ -1907,6 +2015,42 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // POST /api/system/doctor — 执行 openclaw doctor 诊断
+  // ============================================
+
+  if (pathname === '/api/system/doctor' && req.method === 'POST') {
+    const isWindows = os.platform() === 'win32'
+    const command = isWindows ? 'openclaw.cmd' : 'openclaw'
+    const DOCTOR_TIMEOUT = 120000 // 120 秒
+
+    console.log(`[Doctor] 执行诊断: ${command} doctor`)
+
+    const result = await runCommand(command, ['doctor'], DOCTOR_TIMEOUT)
+
+    if (result.success) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        success: true,
+        stdout: result.stdout,
+        stderr: result.stderr || '',
+        command: `${command} doctor`,
+        platform: os.platform()
+      }))
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        success: result.success,
+        stdout: result.stdout || '',
+        stderr: result.stderr || '',
+        error: result.error || '',
+        command: `${command} doctor`,
+        platform: os.platform()
+      }))
+    }
+    return
+  }
+
+  // ============================================
   // 404 for other routes
   // ============================================
 
@@ -1931,6 +2075,7 @@ server.listen(PORT, () => {
   console.log('  GET  /api/system/versions       - 获取版本列表')
   console.log('  POST /api/system/sync-versions  - 同步版本列表')
   console.log('  POST /api/system/switch-version - 切换版本')
+  console.log('  POST /api/system/doctor          - 执行 openclaw doctor 诊断')
   console.log('  POST /reset                     - 重置 Agent')
   console.log('  POST /api/upload-image           - 图片上传 (base64, ≤5MB)')
   console.log('')
@@ -1961,10 +2106,13 @@ process.on('SIGINT', () => {
   })
 })
 
-process.on('SIGTERM', () => {
-  stopAutoScan()
-  server.close(() => {
-    console.log('[服务] 已关闭')
-    process.exit(0)
+// SIGTERM 仅在 Unix 平台注册（Windows 不支持）
+if (os.platform() !== 'win32') {
+  process.on('SIGTERM', () => {
+    stopAutoScan()
+    server.close(() => {
+      console.log('[服务] 已关闭')
+      process.exit(0)
+    })
   })
-})
+}
