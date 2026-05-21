@@ -657,16 +657,15 @@ async function collectUsageStats() {
 
 /**
  * 获取 GPU VRAM 使用情况
+ * 本地查询：macOS system_profiler > nvidia-smi
  */
 async function getGpuVram() {
   const platform = os.platform()
 
-  // macOS: 使用 system_profiler 获取 GPU 信息
   if (platform === 'darwin') {
     return getMacOSGpuInfo()
   }
 
-  // Linux/Windows: 尝试 nvidia-smi，无 NVIDIA GPU 时不抛出异常
   try {
     return await runNvidiaSmi()
   } catch (e) {
@@ -780,6 +779,10 @@ function runNvidiaSmi() {
 }
 
 function parseVramOutput(output) {
+  // 兼容非字符串输入（如 getGpuVram 错误分支返回的对象）
+  if (typeof output !== 'string' || !output.trim()) {
+    return { usedPct: null }
+  }
   const lines = output.split('\n').filter(l => l.trim())
   if (lines.length === 0) {
     return { usedPct: null }
