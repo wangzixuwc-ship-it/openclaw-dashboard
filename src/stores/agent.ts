@@ -394,11 +394,40 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function fetchAgents(): Promise<void> {
     try {
-      const data = await sessionsList()
-      const sessions = Array.isArray((data as any).sessions) ? (data as any).sessions : []
-      agents.value = sessions.map(normalizeAgent)
+      // 同时拉两个数据源：活跃会话 + 已配置 agent 列表
+      const [sessionsData, configuredResp] = await Promise.all([
+        sessionsList(),
+        fetch('/api/agents-configured').then(r => r.ok ? r.json() : { agents: [] }).catch(() => ({ agents: [] })),
+      ])
+
+      const sessions = Array.isArray((sessionsData as any).sessions) ? (sessionsData as any).sessions : []
+      const configuredAgents = Array.isArray(configuredResp?.agents) ? configuredResp.agents : []
+
+      // 先把活跃会话规范化（带运行状态）
+      const sessionAgents = sessions.map(normalizeAgent)
+      const sessionAgentIds = new Set(sessionAgents.map((a: AgentInfo) => {
+        // session key 格式: agent:{agentId}:{sessionId}
+        const parts = (a.key || '').split(':')
+        return parts[1] || ''
+      }).filter(Boolean))
+
+      // 把"已配置但当前无活跃会话"的 agent 补成 idle 卡片
+      const configuredOnlyAgents: AgentInfo[] = configuredAgents
+        .filter((c: any) => !sessionAgentIds.has(c.id))
+        .map((c: any) => ({
+          key: `agent:${c.id}:main`,
+          name: c.name || c.id,
+          displayName: c.emoji ? `${c.emoji} ${c.name}` : c.name,
+          status: 'idle' as AgentStatus,
+          lastActivity: 0,
+          model: c.model,
+          kind: 'configured',
+          channel: 'none',
+        }))
+
+      agents.value = [...sessionAgents, ...configuredOnlyAgents]
       lastUpdateTime.value = Date.now()
-      console.log('[AgentStore] Total sessions (raw):', sessions.length)
+      console.log(`[AgentStore] sessions=${sessions.length} configured=${configuredAgents.length} total=${agents.value.length}`)
     } catch (e) {
       console.error('[AgentStore] fetchAgents error:', e)
       agents.value = []

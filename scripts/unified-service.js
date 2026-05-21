@@ -653,6 +653,38 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // 已配置 Agent 列表 API（从 openclaw.json 读取）
+  // 解决 dashboard 只能显示有 webchat 会话的 agent 的问题
+  // ============================================
+
+  if (pathname === '/api/agents-configured' && req.method === 'GET') {
+    try {
+      const configPath = path.join(OPENCLAW_DIR, 'openclaw.json')
+      const raw = await fs.readFile(configPath, 'utf-8')
+      const config = JSON.parse(raw)
+      const agentsList = config?.agents?.list || []
+
+      // 提取每个 agent 的关键信息
+      const agents = agentsList.map(a => ({
+        id: a.id,
+        name: a?.identity?.name || a.name || a.id,
+        emoji: a?.identity?.emoji || '',
+        model: a.model || (config?.agents?.defaults?.model?.primary || 'unknown'),
+        workspace: a.workspace || null,
+        configured: true,  // 标记为"已配置"
+      }))
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ agents, count: agents.length }))
+    } catch (e) {
+      console.error('[agents-configured] 读取失败:', e.message)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
+  // ============================================
   // Reset Agent API
   // ============================================
 
