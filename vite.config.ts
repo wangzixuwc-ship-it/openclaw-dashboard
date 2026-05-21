@@ -44,6 +44,11 @@ export default defineConfig(({ mode }) => {
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },
+        '/api/agents-configured': {
+          // 已配置 agent 列表 (端口 31002, 修复升级后新 agent 不显示问题)
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
         '/api': {
           target: gatewayUrl,
           changeOrigin: true,
