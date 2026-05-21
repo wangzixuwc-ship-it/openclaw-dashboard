@@ -22,7 +22,7 @@ timeout /t 1 > nul
 
 REM Start unified service
 echo [2/4] Starting unified service (port 31002)...
-start "Unified-Service" /min cmd /k "node scripts\unified-service.js"
+start "Unified-Service" /min cmd /k "chcp 65001 >nul && node scripts\unified-service.js"
 
 REM Wait
 timeout /t 2 > nul

@@ -28,7 +28,12 @@ Openclaw 的版本必须在 2026.3.28 以上。
 
 # 安装指南
 ## 下载并安装NodeJS
-[点击此处下载NodeJS](https://nodejs.org/dist/v24.15.0/node-v24.15.0-x64.msi)
+[Windows点击此处下载NodeJS](https://nodejs.org/dist/v24.15.0/node-v24.15.0-x64.msi)
+
+[MacOS点击此处下载NodeJS](https://nodejs.org/dist/v24.15.0/node-v24.15.0.pkg)
+
+[Linux点击此处下载NodeJS](https://nodejs.org/dist/v24.15.0/node-v24.15.0-linux-x64.tar.xz)
+
 
 下载完成后按双击安装，一直点击下一步即可
 

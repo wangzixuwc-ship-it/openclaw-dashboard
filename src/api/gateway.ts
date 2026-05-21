@@ -241,4 +241,70 @@ export async function resetSession(sessionKey: string): Promise<unknown> {
   }
 }
 
+/**
+ * 删除会话（REC-125）
+ * 通过 Gateway WebSocket RPC 串行调用 sessions.abort + sessions.delete
+ * 前端直连 WS，复用 websocket.ts 基础设施
+ */
+export async function deleteSession(key: string): Promise<{
+  success: boolean
+  error?: string
+  abortResult?: object
+  deleteResult?: object
+}> {
+  // 1. 前端 key 格式校验（F-23）
+  if (!/^[a-zA-Z0-9_:.-]+$/.test(key)) {
+    return { success: false, error: '会话 key 格式无效' }
+  }
+  // 2. 禁止删除 cron 会话（F-14）
+  if (key.includes(':cron:')) {
+    return { success: false, error: '不能删除定时任务会话' }
+  }
+
+  const { useGatewayWebSocket } = await import('./websocket')
+  const ws = useGatewayWebSocket()
+
+  // abortResult 提升作用域，供 catch 块判断 F-24 中间状态
+  let abortResult: object | undefined
+
+  // 整体 30s 超时包装
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('请求超时，请重试')), 30000)
+  })
+
+  const work = (async () => {
+    try {
+      // 3. 先 abort（终止运行中任务，F-10）
+      try {
+        abortResult = await ws.request('sessions.abort', { key })
+      } catch (abortErr: any) {
+        // abort 失败不影响后续 delete 尝试（空闲会话 abort 可能报错）
+        console.warn('[Gateway] sessions.abort non-fatal:', abortErr?.message || abortErr)
+      }
+
+      // 4. 再 delete（永久删除会话，F-11）
+      const deleteResult = await ws.request('sessions.delete', { key }) as object
+      return { success: true, abortResult, deleteResult }
+    } catch (e: any) {
+      const errMsg = e?.message || String(e)
+      // 5. 权限错误特殊处理（F-25）
+      if (errMsg.includes('403') || errMsg.includes('permission') || errMsg.includes('forbidden') || errMsg.includes('unauthorized')) {
+        return { success: false, error: '权限不足，无法删除会话（需要 operator.admin 权限）' }
+      }
+      // 6. abort 成功但 delete 失败的中间状态（F-24）
+      if (abortResult) {
+        return { success: false, error: '会话已终止但删除失败，请刷新列表查看' }
+      }
+      return { success: false, error: errMsg || '删除失败' }
+    }
+  })()
+
+  return Promise.race([work, timeoutPromise]).catch((e) => {
+    if (e instanceof Error && e.message.includes('超时')) {
+      return { success: false, error: e.message }
+    }
+    return { success: false, error: String(e) }
+  })
+}
+
 export default gatewayApi

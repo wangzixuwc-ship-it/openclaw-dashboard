@@ -1,4 +1,4 @@
-<template>
+ <template>
   <el-drawer v-model="drawerVisible" :title="`Agent 详情：${displayAgentName}`" size="1040px" direction="rtl"
     :close-on-click-modal="true" :z-index="3000">
     <template #header>
@@ -74,7 +74,7 @@
                 <el-input v-model="chatInput" type="textarea" :rows="2"
                   placeholder="输入消息... (Enter 发送，Ctrl+Enter 换行，支持粘贴图片)" :disabled="sending"
                   @keydown="handleInputKeydown" />
-                <el-button type="primary" :icon="Promotion" :loading="sending" @click="sendMessage">
+                <el-button type="primary" :icon="Promotion" :loading="sending" :disabled="sending" @click="sendMessage">
                   发送
                 </el-button>
               </div>
@@ -430,10 +430,10 @@ function cleanContent(raw: string): string {
   text = text.replace(/<\s*thinking[^>]*>[\s\S]*?<\/\s*thinking\s*>/gi, '')
   // 2. 移除 antThinking 标签及内容（兼容属性、可选空白）
   text = text.replace(/<\s*antThinking[^>]*>[\s\S]*?<\/\s*antThinking\s*>/gi, '')
-  // 3. 移除 tool_call 标签及内容（XML 风格，兼容属性）
-  text = text.replace(/<\s*tool_call[^>]*>[\s\S]*?<\/\s*tool_call\s*>/gi, '')
-  // 4. 移除 tool_call 自闭合处理指令 <?tool_call ... ?>
-  text = text.replace(/<\?\s*tool_call[\s\S]*?\?>/gi, '')
+  // 3. 移除 toolCall 标签及内容（XML 风格，兼容属性）
+  text = text.replace(/<\s*toolCall[^>]*>[\s\S]*?<\/\s*toolCall\s*>/gi, '')
+  // 4. 移除 toolCall 自闭合处理指令 <?toolCall ... ?>
+  text = text.replace(/<\?\s*toolCall[\s\S]*?\?>/gi, '')
   // 5. 合并过多空行（保留一个空行作为段落分隔），防止相邻行意外形成表格
   text = text.replace(/\n{3,}/g, '\n\n').trim()
   return text
@@ -510,6 +510,8 @@ function splitContentParts(content: unknown): { contentType: string; content: st
     const parts = content.map((item: Record<string, unknown>) => {
       if (!item || typeof item !== 'object') return null
       const type = String(item.type ?? '')
+      console.log('👉type👉',type)
+
       if (type === 'text') {
         const text = String(item.text ?? item.content ?? '')
         return text ? { contentType: 'text', content: text } : null
@@ -518,13 +520,29 @@ function splitContentParts(content: unknown): { contentType: string; content: st
         const thinking = String(item.thinking ?? '')
         return thinking ? { contentType: 'thinking', content: thinking } : null
       }
-      if (type === 'tool_use') {
+      // 支持 tool_use 和 toolCall 两种命名（不同 API 可能使用不同字段名）
+      if (type === 'toolUse' || type === 'toolCall') {
         const name = String(item.name ?? '')
-        if (name) return { contentType: 'tool_use', content: `[${name}]` }
-        const input = item.input
-        if (typeof input === 'string' && input) return { contentType: 'tool_use', content: '[工具调用]' }
-        if (typeof input === 'object' && input !== null) return { contentType: 'tool_use', content: '[工具调用]' }
-        return null
+        const input = item.input ?? item.arguments ?? item.parameters
+        let displayContent = ''
+        if (name) {
+          displayContent = `**工具调用：${name}**`
+        } else {
+          displayContent = '**工具调用**'
+        }
+        // 显示参数
+        if (typeof input === 'object' && input !== null) {
+          displayContent += '\n\n```json\n' + JSON.stringify(input, null, 2) + '\n```'
+        } else if (typeof input === 'string' && input) {
+          // 尝试解析为 JSON，失败则直接显示
+          try {
+            const parsed = JSON.parse(input)
+            displayContent += '\n\n```json\n' + JSON.stringify(parsed, null, 2) + '\n```'
+          } catch {
+            displayContent += `\n\n\`\`\`\n${input.slice(0, 500)}\n\`\`\``
+          }
+        }
+        return displayContent ? { contentType: 'tool_use', content: displayContent } : null
       }
       if (type === 'tool_result') {
         const name = String(item.name ?? '')
@@ -547,12 +565,17 @@ function splitContentParts(content: unknown): { contentType: string; content: st
           const textParts = resultContent
             .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
             .map((r: any) => r.text)
-          if (textParts.length > 0) text = textParts.join('\n').slice(0, 200)
+          if (textParts.length > 0) text = textParts.join('\n').slice(0, 500)
         }
         if (!text && typeof item.text === 'string' && item.text) text = item.text
-        if (!text && name) text = `[${name}]`
+        if (!text && name) text = '[无返回内容]'
         if (!text) text = '[工具结果]'
-        return { contentType: 'tool_result', content: text, isError }
+        
+        // 构建显示内容，包含工具名称
+        let displayContent = ''
+        if (name) displayContent += `**${name}**\n`
+        displayContent += text
+        return { contentType: 'tool_result', content: displayContent, isError }
       }
       // OpenAI 风格的图片：{ type: 'image_url', image_url: { url } }
       if (type === 'image_url') {

@@ -30,9 +30,10 @@
       empty-text="暂无版本数据"
       :header-cell-style="{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }"
     >
-      <el-table-column prop="version" label="版本号">
+      <el-table-column prop="version" label="版本号" min-width="180">
         <template #default="{ row }">
-          <span class="version-cell version-click" @click="handleVersionClick(row)">{{ row.version }}</span>
+          <span class="version-cell version-click" :title="row.version" @click="handleVersionClick(row)">{{ row.version }}
+          </span>
         </template>
       </el-table-column>
 
@@ -392,13 +393,10 @@ onUnmounted(() => {
   vertical-align: middle;
 }
 
-/* 版本号单元格：单行显示，超出省略 */
+/* 版本号单元格：单行完整显示，不截断 */
 .version-cell {
   display: inline-block;
-  max-width: 100%;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   vertical-align: middle;
 }
 

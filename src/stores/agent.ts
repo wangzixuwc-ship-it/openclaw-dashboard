@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { sessionsList, sessionStatus, health, sessionsHistory, agentsList, getGpuVramUsage, sessionsSend } from '../api/gateway'
+import { sessionsList, sessionStatus, health, sessionsHistory, agentsList, getGpuVramUsage, sessionsSend, deleteSession as deleteSessionApi } from '../api/gateway'
 import { getUsageStats } from '../api/usage-stats'
 import { getVersion } from '../api/system'
 
@@ -649,6 +649,26 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  /**
+   * 删除会话（REC-125）
+   * 调用 API 层 deleteSession → 成功后刷新列表
+   */
+  async function deleteSession(sessionKey: string): Promise<{
+    success: boolean
+    error?: string
+  }> {
+    try {
+      const result = await deleteSessionApi(sessionKey)
+      if (result.success) {
+        // 删除成功后重新请求 sessions_list（F-22）
+        await fetchAgents()
+      }
+      return result as { success: boolean; error?: string }
+    } catch (e: any) {
+      return { success: false, error: e?.message || '删除失败' }
+    }
+  }
+
   /** 从 sessionKey 提取 agentId（与 resetSession 共用） */
   function extractAgentId(sessionKey: string): string {
     if (sessionKey.includes(':')) {
@@ -734,7 +754,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function fetchSessionHistory(sessionKey: string, limit: number = 100): Promise<Record<string, unknown>[]> {
     try {
-      const data = await sessionsHistory(sessionKey, { limit })
+      const data = await sessionsHistory(sessionKey, { limit, includeTools: true })
       if (Array.isArray(data)) return data as Record<string, unknown>[]
       if (data && typeof data === 'object') {
         const typed = data as Record<string, unknown>
@@ -1117,6 +1137,7 @@ export const useAgentStore = defineStore('agent', () => {
     sendAgentMessage,
     sendAgentMessageWithImages,
     fetchSessionHistory,
+    deleteSession,
     subscribeAgents,
     stopPolling,
     // REC-071: 消息气泡

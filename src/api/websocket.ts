@@ -98,6 +98,36 @@ class GatewayWebSocket {
 
   request(method: string, params: Record<string, unknown> = {}, timeoutMs = 10000): Promise<unknown> {
     return new Promise((resolve, reject) => {
+      // 未连接时自动尝试连接，最多等待 10s
+      if (this.ws?.readyState !== WebSocket.OPEN) {
+        if (this.ws?.readyState === WebSocket.CONNECTING) {
+          console.warn('[GatewayWS] WebSocket connecting...')
+        } else {
+          console.log('[GatewayWS] WebSocket not connected, connecting now...')
+          this.connect()
+        }
+
+        // 等待连接就绪
+        let waitCount = 0
+        const waitInterval = setInterval(() => {
+          waitCount++
+          if (this.ws?.readyState === WebSocket.OPEN) {
+            clearInterval(waitInterval)
+            this._doRequest(method, params, timeoutMs).then(resolve).catch(reject)
+          } else if (waitCount >= 100) { // 10s = 100 * 100ms
+            clearInterval(waitInterval)
+            reject(new Error('[GatewayWS] Cannot send request — connection timeout (10s)'))
+          }
+        }, 100)
+        return
+      }
+
+      this._doRequest(method, params, timeoutMs).then(resolve).catch(reject)
+    })
+  }
+
+  private _doRequest(method: string, params: Record<string, unknown>, timeoutMs: number): Promise<unknown> {
+    return new Promise((resolve, reject) => {
       if (this.ws?.readyState !== WebSocket.OPEN) {
         reject(new Error('[GatewayWS] Cannot send request — not connected'))
         return
