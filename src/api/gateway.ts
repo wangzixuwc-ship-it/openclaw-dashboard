@@ -227,16 +227,19 @@ async function isToolAvailable(toolName: string, cacheTtlMs = 60_000): Promise<b
 
 /**
  * Reset session (重置会话)
- * 通过 WebSocket chat.send 发送 /reset 命令，只需要 operator.write 权限
- * sessions_send 需要 operator.admin 权限，Control UI 没有
+ * 通过后端 POST /reset API（REC-005 修复：替代 WebSocket chat.send，避免 operator.write 权限问题）
+ * 后端 API 格式：POST /reset，Body: { "agentId": "frontend" }
  */
-export async function resetSession(sessionKey: string): Promise<unknown> {
-  const { useGatewayWebSocket } = await import('./websocket')
-  const ws = useGatewayWebSocket()
+export async function resetSession(agentId: string): Promise<unknown> {
   try {
-    return await ws.request('chat.send', { sessionKey, message: '/reset' })
+    // 参考 getGpuVramUsage 的 URL 处理模式（DEV 用 Vite proxy，PROD 直连后端）
+    const url = import.meta.env.DEV
+      ? '/reset'
+      : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31002'}/reset`
+    const resp = await axios.post(url, { agentId }, { timeout: 10000 })
+    return resp.data
   } catch (e: any) {
-    console.error('[Gateway] resetSession via chat.send failed:', e)
+    console.error('[Gateway] resetSession via POST /reset failed:', e)
     throw new Error(`重置失败: ${e.message}`)
   }
 }

@@ -224,8 +224,8 @@ body {
 }
 
 .el-popper__arrow::before {
-  background: linear-gradient(135deg, rgba(26, 26, 46, 0.95), rgba(18, 18, 36, 0.98)) !important;
-  border: 1px solid rgba(66, 165, 245, 0.35) !important;
+  background-color: var(--border-color) !important;
+  border-color: var(--border-color) !important;
 }
 
 /* Divider */

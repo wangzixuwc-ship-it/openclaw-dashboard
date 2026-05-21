@@ -67,7 +67,7 @@
               </template>
               安装
             </el-button>
-            <span class="status-badge" :class="skill.enabled ? 'badge-enabled' : 'badge-not-enabled'">
+            <span v-if="skill.installed" class="status-badge" :class="skill.enabled ? 'badge-enabled' : 'badge-not-enabled'">
               {{ skill.enabled ? '🟢 已启用' : '⚪ 未启用' }}
             </span>
           </div>

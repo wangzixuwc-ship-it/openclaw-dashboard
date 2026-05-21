@@ -765,9 +765,10 @@ async function refreshStatus(): Promise<void> {
 async function handleResetSession(): Promise<void> {
   if (!agent.value?.key) return
 
+  const agentId = agent.value.key.split(':').length >= 2 ? agent.value.key.split(':')[1] : agent.value.key
   try {
     await ElMessageBox.confirm(
-      `确定要重置 "${displayAgentName.value}" 的会话吗？这将执行命令：openclaw agent --agent ${agent.value.key.split(':')[1] || agent.value.key} --message "/reset"`,
+      `确定要重置 "${displayAgentName.value}" 的会话吗？这将执行命令：openclaw agent --agent ${agentId} --message "/reset"`,
       '重置会话',
       {
         confirmButtonText: '确定',

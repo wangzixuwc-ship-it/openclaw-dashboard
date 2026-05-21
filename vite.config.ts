@@ -71,6 +71,11 @@ export default defineConfig(({ mode }) => {
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },
+        '/reset': {
+          // 重置 Agent API (端口 31002, REC-005)
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
         '/api': {
           target: gatewayUrl,
           changeOrigin: true,
