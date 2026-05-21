@@ -49,9 +49,9 @@
                         :class="bubbleClass(msg)"
                       >
                         <div class="bubble-label" v-if="msg.contentType === 'thinking'">💭 思考</div>
-                        <div class="bubble-label" v-else-if="msg.contentType === 'tool_use'">🔧 工具调用</div>
-                        <div class="bubble-label" v-else-if="msg.contentType === 'tool_result' && msg.isError">⚠️ 工具错误</div>
-                        <div class="bubble-label" v-else-if="msg.contentType === 'tool_result'">🔧 工具结果</div>
+                        <div class="bubble-label" v-else-if="msg.contentType === 'toolUse'">🔧 工具调用</div>
+                        <div class="bubble-label" v-else-if="msg.contentType === 'toolResult' && msg.isError">⚠️ 工具错误</div>
+                        <div class="bubble-label" v-else-if="msg.contentType === 'toolResult'">🔧 工具结果</div>
                         <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
                       </div>
                     </div>
@@ -388,7 +388,7 @@ function bubbleClass(msg: MessageItem): string {
   if (msg.role === 'user') return 'bubble-user'
   if (msg.contentType === 'image' || msg.contentType === 'file') return 'bubble-media'
   if (msg.contentType === 'thinking') return 'bubble-thinking'
-  if (msg.contentType === 'tool_use' || msg.contentType === 'tool_result') {
+  if (msg.contentType === 'toolUse' || msg.contentType === 'toolResult') {
     if (msg.isError) return 'bubble-tool-error'
     return 'bubble-tool'
   }
@@ -510,7 +510,6 @@ function splitContentParts(content: unknown): { contentType: string; content: st
     const parts = content.map((item: Record<string, unknown>) => {
       if (!item || typeof item !== 'object') return null
       const type = String(item.type ?? '')
-      console.log('👉type👉',type)
 
       if (type === 'text') {
         const text = String(item.text ?? item.content ?? '')
@@ -520,7 +519,7 @@ function splitContentParts(content: unknown): { contentType: string; content: st
         const thinking = String(item.thinking ?? '')
         return thinking ? { contentType: 'thinking', content: thinking } : null
       }
-      // 支持 tool_use 和 toolCall 两种命名（不同 API 可能使用不同字段名）
+      // 支持 toolUse 和 toolCall 两种命名（不同 API 可能使用不同字段名）
       if (type === 'toolUse' || type === 'toolCall') {
         const name = String(item.name ?? '')
         const input = item.input ?? item.arguments ?? item.parameters
@@ -542,12 +541,12 @@ function splitContentParts(content: unknown): { contentType: string; content: st
             displayContent += `\n\n\`\`\`\n${input.slice(0, 500)}\n\`\`\``
           }
         }
-        return displayContent ? { contentType: 'tool_use', content: displayContent } : null
+        return displayContent ? { contentType: 'toolUse', content: displayContent } : null
       }
-      if (type === 'tool_result') {
+      if (type === 'toolResult') {
         const name = String(item.name ?? '')
         const isError = item.is_error === true
-        // tool_result 的 content 可能是数组 [{type:'text', text:'...'}] 或纯字符串
+        // toolResult 的 content 可能是数组 [{type:'text', text:'...'}] 或纯字符串
         const resultContent = item.content
         let text = ''
         if (isError) {
@@ -575,7 +574,7 @@ function splitContentParts(content: unknown): { contentType: string; content: st
         let displayContent = ''
         if (name) displayContent += `**${name}**\n`
         displayContent += text
-        return { contentType: 'tool_result', content: displayContent, isError }
+        return { contentType: 'toolResult', content: displayContent, isError }
       }
       // OpenAI 风格的图片：{ type: 'image_url', image_url: { url } }
       if (type === 'image_url') {
@@ -646,7 +645,7 @@ async function loadHistory(silent: boolean = false, scrollToEnd: boolean = true)
         }
 
         const bubbleRole = part.contentType === 'thinking' ? 'thinking'
-          : (part.contentType === 'tool_use' || part.contentType === 'tool_result') ? 'tool'
+          : (part.contentType === 'toolUse' || part.contentType === 'toolResult') ? 'tool'
             : (['user', 'assistant', 'system'].includes(role) ? role : 'assistant')
 
         return {

@@ -1108,6 +1108,231 @@ async function getCurrentTaskProgress(taskId) {
   }
 }
 
+/**
+ * 解析 clawhub search 命令的输出为技能数组
+ * 格式: "name  @author  description  (score)"
+ */
+function parseClawHubSearchOutput(rawOutput) {
+  const skills = []
+  const lines = rawOutput.split('\n').filter(l => l.trim())
+
+  for (const line of lines) {
+    // 跳过 "- Searching" 等提示行
+    if (line.startsWith('-') || line.startsWith('Searching') || line.startsWith('No results')) continue
+
+    // 按双空格分割: name  @author  description  (score)
+    const parts = line.split('  ').map(s => s.trim()).filter(Boolean)
+    if (parts.length < 1) continue
+
+    const name = parts[0] || ''
+    const authorPart = parts[1] || ''
+    const description = parts[2] || ''
+    const scoreMatch = parts[3]?.match(/\(([\d.]+)\)/)
+    const score = scoreMatch ? parseFloat(scoreMatch[1]) : 0
+
+    const author = authorPart.replace(/^@/, '')
+
+    skills.push({
+      name,
+      author,
+      description,
+      score,
+      installed: false
+    })
+  }
+
+  return skills
+}
+
+/**
+ * REC-014: 获取已安装技能名称集合
+ * 通过 openclaw skills list --json 获取，判断 missing 为空即为已安装
+ */
+async function getInstalledSkillNames() {
+  const isWindows = os.platform() === 'win32'
+  const command = isWindows ? 'openclaw.cmd' : 'openclaw'
+  const installedNames = new Set()
+
+  try {
+    const result = await runCommand(command, ['skills', 'list', '--json'], 30000)
+    if (result.success) {
+      let rawOutput = result.stdout || result.stderr || ''
+      const jsonStart = rawOutput.indexOf('{')
+      if (jsonStart >= 0) {
+        const jsonStr = rawOutput.slice(jsonStart)
+        const parsed = JSON.parse(jsonStr)
+        const skills = parsed.skills || []
+        for (const skill of skills) {
+          const m = skill.missing || {}
+          const isInstalled = (m.bins || []).length === 0
+            && (m.anyBins || []).length === 0
+            && (m.env || []).length === 0
+            && (m.config || []).length === 0
+            && (m.os || []).length === 0
+          if (isInstalled && skill.name) {
+            installedNames.add(skill.name)
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Installed Skills] 获取失败:', err.message)
+  }
+
+  console.log(`[Installed Skills] 已安装技能: ${[...installedNames].join(', ') || '(none)'}`)
+  return installedNames
+}
+
+/**
+ * REC-016: 获取已安装技能信息，用于与 ClawHub 搜索结果匹配
+ * 
+ * 问题根因：
+ *   - ClawHub 搜索返回 slug: "douyin-no-watermark-downloader"
+ *   - 已安装技能名称是文件夹名: "无水印抖音视频下载器"
+ *   - 部分技能无 homepage 字段，无法提取 slug
+ * 
+ * 匹配策略（优先级从高到低）:
+ *   1. slug 精确匹配（从 homepage URL 提取的 ClawHub slug）
+ *   2. 名称精确匹配（skill.name 直接对比）
+ *   3. 描述关键词匹配（搜索结果的 description 包含在已安装技能的 description 中或反之）
+ */
+async function getInstalledSkillInfo() {
+  const isWindows = os.platform() === 'win32'
+  const command = isWindows ? 'openclaw.cmd' : 'openclaw'
+  const installedSlugs = new Set()
+  const installedNames = new Set()
+  const installedDescriptions = [] // {name, description}
+
+  try {
+    const result = await runCommand(command, ['skills', 'list', '--json'], 30000)
+    if (result.success) {
+      let rawOutput = result.stdout || result.stderr || ''
+      const jsonStart = rawOutput.indexOf('{')
+      if (jsonStart >= 0) {
+        const jsonStr = rawOutput.slice(jsonStart)
+        const parsed = JSON.parse(jsonStr)
+        const skills = parsed.skills || []
+        for (const skill of skills) {
+          // 从 homepage URL 提取 ClawHub slug（clawhub.ai / clawic.com）
+          const homepage = skill.homepage || ''
+          const slugMatch = homepage.match(/(?:clawhub\.ai|clawic\.com)\/skills\/([^/?#]+)/)
+          if (slugMatch) {
+            installedSlugs.add(slugMatch[1])
+          }
+
+          // 名称集合
+          if (skill.name) {
+            installedNames.add(skill.name)
+          }
+
+          // 描述信息（用于模糊匹配）
+          const desc = (skill.description || '').trim()
+          if (desc) {
+            installedDescriptions.push({ name: skill.name, description: desc })
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Installed Skill Info] 获取失败:', err.message)
+  }
+
+  console.log(`[Installed Skill Info] slugs: ${installedSlugs.size}, names: ${installedNames.size}, descriptions: ${installedDescriptions.length}`)
+  return { installedSlugs, installedNames, installedDescriptions }
+}
+
+/**
+ * 通过 clawhub inspect --json 获取单个技能的统计信息
+ * 返回 { updatedAt, stars, downloads } 或 null
+ * 注意: clawhub inspect --json 可能返回非 0 退出码但仍有有效 JSON 输出
+ */
+async function getClawHubSkillInfo(skillName) {
+  const isWindows = os.platform() === 'win32'
+  const command = isWindows ? 'npx.cmd' : 'npx'
+  const INSPECT_TIMEOUT = 5000 // 5 秒超时（REC-013 优化：缩短超时减少阻塞）
+
+  const result = await runCommand(command, ['clawhub', 'inspect', '--json', skillName], INSPECT_TIMEOUT)
+
+  // clawhub inspect --json 可能返回非 0 退出码但仍有有效 JSON，所以即使 success=false 也尝试解析
+  const output = (result.stdout || '') + (result.stderr || '')
+  
+  // 解析 JSON 输出（跳过 "- Fetching skill" 等提示行）
+  // JSON 对象可能跨多行，从第一个 { 开始到最后一个 } 结束
+  const firstBrace = output.indexOf('{')
+  const lastBrace = output.lastIndexOf('}')
+  if (firstBrace === -1 || lastBrace === -1 || firstBrace >= lastBrace) {
+    return null
+  }
+  const jsonStr = output.substring(firstBrace, lastBrace + 1)
+
+  if (!jsonStr) {
+    return null
+  }
+
+  try {
+    const data = JSON.parse(jsonStr)
+    const skill = data.skill || {}
+    const stats = skill.stats || {}
+
+    // updatedAt 是毫秒时间戳，转为 ISO 日期字符串
+    const updatedAt = skill.updatedAt ? new Date(skill.updatedAt).toISOString().split('T')[0] : null
+
+    return {
+      updatedAt,
+      slug: skill.slug || null,
+      displayName: skill.displayName || null,
+      stars: stats.stars || 0,
+      downloads: stats.downloads || 0
+    }
+  } catch (parseError) {
+    return null
+  }
+}
+
+/**
+ * 批量获取技能统计信息（并行调用，限制并发数）
+ * REC-013 优化：
+ * - 并发数 5 → 10（减少批次，降低总耗时）
+ * - 单个超时 15s → 5s（快速跳过慢响应）
+ * - 失败立即跳过而非阻塞
+ */
+async function enrichSkillsWithInfo(skills, maxConcurrent = 10) {
+  if (skills.length === 0) return
+
+  const enrichStartTime = Date.now()
+
+  // 按批次并行执行，提高并发数减少批次
+  for (let i = 0; i < skills.length; i += maxConcurrent) {
+    const batch = skills.slice(i, i + maxConcurrent)
+    // Promise.allSettled 确保单个失败不影响其他请求
+    const results = await Promise.allSettled(
+      batch.map(skill => getClawHubSkillInfo(skill.name))
+    )
+
+    // 将结果合并回 skills 数组
+    for (let j = 0; j < batch.length; j++) {
+      const result = results[j]
+      // 处理 rejected 或返回 null 的情况（REC-013：失败跳过而非阻塞）
+      if (result.status === 'fulfilled' && result.value) {
+        batch[j].updatedAt = result.value.updatedAt
+        batch[j].slug = result.value.slug || null
+        batch[j].displayName = result.value.displayName || null
+        batch[j].stars = result.value.stars
+        batch[j].downloads = result.value.downloads
+      } else {
+        batch[j].updatedAt = null
+        batch[j].slug = null
+        batch[j].displayName = null
+        batch[j].stars = 0
+        batch[j].downloads = 0
+      }
+    }
+  }
+
+  const enrichDuration = ((Date.now() - enrichStartTime) / 1000).toFixed(1)
+  console.log(`[Skills Enrich] 完成 ${skills.length} 个技能 enrich，耗时 ${enrichDuration}s`)
+}
+
 // ============================================
 // HTTP Server
 // ============================================
@@ -1876,6 +2101,105 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // GET /api/system/skills/search — 搜索 ClawHub 技能
+  // ============================================
+
+  if (pathname === '/api/system/skills/search' && req.method === 'GET') {
+    const params = new URL(req.url, `http://localhost:${PORT}`).searchParams
+    const query = params.get('q') || ''
+
+    if (!query.trim()) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ success: true, total: 0, skills: [] }))
+      return
+    }
+
+    const isWindows = os.platform() === 'win32'
+    const command = isWindows ? 'npx.cmd' : 'npx'
+    const SEARCH_TIMEOUT = 30000 // 30 秒超时
+
+    console.log(`[Skills Search] 执行: ${command} clawhub search "${query.trim()}"`)
+
+    const result = await runCommand(command, ['clawhub', 'search', query.trim()], SEARCH_TIMEOUT)
+
+    if (result.success) {
+      try {
+        let rawOutput = result.stdout || result.stderr || ''
+        // clawhub search 输出是纯文本格式，需要解析
+        // 格式: "name  @author  description  (score)"
+        const skills = parseClawHubSearchOutput(rawOutput)
+
+        // 通过 clawhub inspect --json 补充统计信息（含描述）
+        if (skills.length > 0) {
+          console.log(`[Skills Search] 获取 ${skills.length} 个技能的统计信息...`)
+          await enrichSkillsWithInfo(skills)
+        }
+
+        // REC-016: enrich 后再标记 installed（多重匹配策略）
+        if (skills.length > 0) {
+          const { installedSlugs, installedNames, installedDescriptions } = await getInstalledSkillInfo()
+          for (const skill of skills) {
+            // 策略 1: enrich 获取的 slug 与 homepage 提取的 slug 精确匹配
+            if (skill.slug && installedSlugs.has(skill.slug)) {
+              skill.installed = true
+            }
+            // 策略 2: 搜索名称与 homepage 提取的 slug 匹配
+            else if (installedSlugs.has(skill.name)) {
+              skill.installed = true
+            }
+            // 策略 3: 搜索名称与已安装名称精确匹配
+            else if (installedNames.has(skill.name)) {
+              skill.installed = true
+            }
+            // 策略 4: enrich 获取的 displayName 与已安装名称匹配
+            else if (skill.displayName && installedNames.has(skill.displayName)) {
+              skill.installed = true
+            }
+            // 策略 5: description 与已安装技能的 description 模糊匹配（兜底）
+            else if (skill.description) {
+              for (const inst of installedDescriptions) {
+                const sDesc = skill.description.trim()
+                const iDesc = inst.description.trim()
+                if (sDesc === iDesc || sDesc.includes(iDesc) || iDesc.includes(sDesc)) {
+                  skill.installed = true
+                  break
+                }
+              }
+            }
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          total: skills.length,
+          skills
+        }))
+      } catch (parseError) {
+        console.error('[Skills Search] 解析失败:', parseError.message)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          total: 0,
+          skills: [],
+          _debug: (result.stdout || result.stderr || '').substring(0, 500)
+        }))
+      }
+    } else {
+      console.error(`[Skills Search] 搜索失败: ${result.error}`)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        success: false,
+        total: 0,
+        skills: [],
+        error: result.error,
+        stderr: (result.stderr || '').substring(0, 500)
+      }))
+    }
+    return
+  }
+
+  // ============================================
   // POST /api/system/doctor — 执行 openclaw doctor 诊断
   // ============================================
 
@@ -1938,6 +2262,7 @@ server.listen(PORT, () => {
   console.log('  GET  /api/tasks/current           - 获取当前任务进度')
   console.log('  GET  /api/system/skills           - 获取技能列表')
   console.log('  POST /api/system/skills/install   - 安装技能')
+  console.log('  GET  /api/system/skills/search    - 搜索 ClawHub 技能')
   console.log('  POST /api/system/doctor          - 执行 openclaw doctor 诊断')
   console.log('  POST /reset                     - 重置 Agent')
   console.log('  POST /api/upload-image           - 图片上传 (base64, ≤5MB)')

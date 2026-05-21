@@ -8,6 +8,10 @@ export interface SkillInfo {
   status?: string
   installed?: boolean
   enabled?: boolean
+  // REC-011: 统计信息
+  updatedAt?: string
+  stars?: number
+  downloads?: number
   [key: string]: unknown
 }
 
@@ -107,5 +111,29 @@ export async function installSkill(name: string): Promise<InstallSkillResult | n
     console.error('[System] installSkill error:', e)
     const message = (e instanceof Error ? e.message : '安装失败')
     return { success: false, message }
+  }
+}
+
+/**
+ * 搜索 ClawHub 技能 (REC-008)
+ * 后端接口: GET /api/system/skills/search?q=关键词 → 端口 31002
+ * 返回: { success: boolean, total: number, skills: SkillInfo[] }
+ */
+export interface SearchSkillsResult {
+  success: boolean
+  total: number
+  skills: SkillInfo[]
+}
+
+export async function searchClawHubSkills(query: string): Promise<SearchSkillsResult | null> {
+  try {
+    const url = import.meta.env.DEV
+      ? '/api/system/skills/search'
+      : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31002'}/api/system/skills/search`
+    const resp = await axios.get(url, { params: { q: query }, timeout: 60000 }) // REC-013: 30s → 60s
+    return resp.data as SearchSkillsResult
+  } catch (e: unknown) {
+    console.error('[System] searchClawHubSkills error:', e)
+    return null
   }
 }

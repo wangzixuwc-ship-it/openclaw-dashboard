@@ -37,23 +37,133 @@
       <span>加载技能列表...</span>
     </div>
 
-    <!-- 技能卡片列表 -->
-    <el-scrollbar v-else-if="skillsData?.skills.length" class="skills-scrollbar">
+    <!-- Tab 标签页 (REC-006) -->
+    <el-tabs v-else-if="skillsData?.skills.length" v-model="activeTab" class="skills-tabs">
+      <el-tab-pane name="installed">
+        <template #label>
+          <span>已安装</span>
+          <el-tag size="small" type="success" class="tab-count">{{ installedSkills.length }}</el-tag>
+        </template>
+      </el-tab-pane>
+      <el-tab-pane name="notInstalled">
+        <template #label>
+          <span>未安装</span>
+          <el-tag size="small" type="info" class="tab-count">{{ notInstalledSkills.length }}</el-tag>
+        </template>
+      </el-tab-pane>
+      <el-tab-pane name="clawhub">
+        <template #label>
+          <span>ClawHub</span>
+        </template>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- ClawHub 搜索模式 (REC-008) -->
+    <div v-if="activeTab === 'clawhub'" class="clawhub-search-section">
+      <el-input
+        v-model="searchQuery"
+        placeholder="搜索技能..."
+        @keyup.enter="handleSearch"
+        prefix-icon="Search"
+        class="clawhub-search-input"
+      >
+        <template #append>
+          <el-button @click="handleSearch">搜索</el-button>
+        </template>
+      </el-input>
+
+      <!-- 搜索结果 -->
+      <el-scrollbar v-if="hasSearched" class="clawhub-scrollbar" view-class="clawhub-results-scroll">
+        <div class="clawhub-results">
+          <div v-if="searching" class="clawhub-loading">
+            <el-icon :size="20" class="is-loading"><Loading /></el-icon>
+            <span>搜索中...</span>
+          </div>
+          <div v-else-if="searchResults.length === 0" class="clawhub-empty">
+            <el-empty description="未找到相关技能" :image-size="60" />
+          </div>
+          <div v-else class="skills-grid">
+          <el-card
+            v-for="skill in searchResults"
+            :key="'search-' + skill.name"
+            class="skill-card"
+            shadow="hover"
+          >
+            <div class="skill-status-badges">
+              <el-button
+                v-if="!skill.installed"
+                size="small"
+                type="primary"
+                plain
+                @click="handleInstall(skill.name)"
+                :loading="installingSkills.get(skill.name)"
+                :disabled="installingSkills.get(skill.name)"
+                class="install-skill-btn"
+              >
+                <template #icon>
+                  <el-icon><Download /></el-icon>
+                </template>
+                安装
+              </el-button>
+              <span v-else class="status-badge badge-enabled">
+                🟢 已安装
+              </span>
+            </div>
+
+            <div class="skill-card-inner">
+              <div class="skill-icon-wrap">
+                <el-icon :size="28" class="skill-icon skill-icon-default">
+                  <Collection />
+                </el-icon>
+              </div>
+
+              <div class="skill-info">
+                <div class="skill-name-row">
+                  <span class="skill-name">{{ skill.name }}</span>
+                </div>
+                <div class="skill-description" v-if="skill.description">
+                  {{ skill.description }}
+                </div>
+                <!-- REC-011: 统计信息 -->
+                <div class="skill-stats" v-if="skill.updatedAt || skill.stars !== undefined || skill.downloads !== undefined">
+                  <span v-if="skill.updatedAt" class="stat-item">
+                    📅 {{ formatDate(skill.updatedAt) }}
+                  </span>
+                  <span v-if="skill.stars !== undefined" class="stat-item">
+                    ⭐ {{ skill.stars }}
+                  </span>
+                  <span v-if="skill.downloads !== undefined" class="stat-item">
+                    📦 {{ skill.downloads }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </el-card>
+        </div>
+          </div>
+        </el-scrollbar>
+
+      <!-- 默认提示 -->
+      <div v-else class="clawhub-hint">
+        <el-icon :size="40" class="clawhub-hint-icon"><Search /></el-icon>
+        <p class="clawhub-hint-text">在上方输入关键词搜索 ClawHub 技能</p>
+      </div>
+    </div>
+
+    <!-- 技能卡片列表 (已安装/未安装 tab) -->
+    <el-scrollbar v-if="skillsData?.skills.length && activeTab !== 'clawhub'" class="skills-scrollbar">
       <div class="skills-grid">
         <el-card
-          v-for="skill in skillsData.skills"
+          v-for="skill in filteredSkills"
           :key="skill.name"
           class="skill-card"
           shadow="hover"
         >
           <!-- 右上角状态标识 (REC-006/REC-012) -->
           <div class="skill-status-badges">
-            <!-- REC-012: 已安装显示标签，未安装显示安装按钮 -->
-            <span v-if="skill.installed" class="status-badge badge-installed">
-              ✅ 已安装
-            </span>
+            <!-- REC-012: 已安装显示启用状态，未安装显示安装按钮 -->
             <el-button
-              v-else
+              v-if="!skill.installed"
               size="small"
               type="primary"
               plain
@@ -115,13 +225,14 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
-import { getSkills, installSkill, type SkillsResponse } from '../api/system'
+import { getSkills, installSkill, searchClawHubSkills, type SkillsResponse, type SkillInfo } from '../api/system'
 import { ElMessage } from 'element-plus'
 import {
   Loading,
   Collection,
   Download,
   Refresh,
+  Search,
 } from '@element-plus/icons-vue'
 
 const props = withDefaults(defineProps<{
@@ -143,6 +254,54 @@ const loading = ref(false)
 const skillsData = ref<SkillsResponse | null>(null)
 // REC-012: 安装中状态跟踪（按 skill name 区分）
 const installingSkills = ref<Map<string, boolean>>(new Map())
+
+// REC-006: Tab 标签页状态
+const activeTab = ref('installed')
+
+// REC-008: ClawHub 搜索状态
+const searchQuery = ref('')
+const searchResults = ref<SkillInfo[]>([])
+const searching = ref(false)
+const hasSearched = ref(false)
+
+/** 已安装技能 (installed === true) */
+const installedSkills = computed(() => {
+  return skillsData.value?.skills.filter(s => s.installed) ?? []
+})
+
+/** 未安装技能 (installed === false) */
+const notInstalledSkills = computed(() => {
+  return skillsData.value?.skills.filter(s => !s.installed) ?? []
+})
+
+/** ClawHub 技能 (enabled === true) */
+const clawhubSkills = computed(() => {
+  return skillsData.value?.skills.filter(s => s.enabled) ?? []
+})
+
+/** REC-008: 已安装技能名集合（用于快速判断） */
+const installedNames = computed(() => {
+  const set = new Set<string>()
+  for (const s of installedSkills.value) set.add(s.name)
+  return set
+})
+
+/** 根据当前 tab 返回筛选后的技能列表 */
+const filteredSkills = computed(() => {
+  switch (activeTab.value) {
+    case 'installed':
+      return installedSkills.value
+    case 'notInstalled':
+      return notInstalledSkills.value
+    case 'clawhub':
+      return searchResults.value.map(s => ({
+        ...s,
+        installed: installedNames.value.has(s.name),
+      }))
+    default:
+      return skillsData.value?.skills ?? []
+  }
+})
 
 watch(() => props.visible, async (val) => {
   if (val) {
@@ -166,6 +325,43 @@ async function fetchSkills(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 搜索按钮/回车触发的入口
+ */
+function handleSearch(): void {
+  searchSkills(searchQuery.value)
+}
+
+/**
+ * REC-008: 搜索 ClawHub 技能
+ */
+async function searchSkills(query: string): Promise<void> {
+  if (!query.trim()) return
+  searching.value = true
+  hasSearched.value = true
+  try {
+    const result = await searchClawHubSkills(query.trim())
+    if (result?.success) {
+      searchResults.value = result.skills ?? []
+    } else {
+      searchResults.value = []
+      ElMessage.warning('未找到相关技能')
+    }
+  } catch (e: unknown) {
+    console.error('[SkillsDialog] searchSkills error:', e)
+    searchResults.value = []
+    ElMessage.error('搜索失败')
+  } finally {
+    searching.value = false
+  }
+}
+
+/** REC-008: 清空搜索 */
+function onClearSearch(): void {
+  searchResults.value = []
+  hasSearched.value = false
 }
 
 /**
@@ -200,6 +396,22 @@ function getStatusType(status: string): '' | 'success' | 'warning' | 'danger' | 
   return 'warning'
 }
 
+/** REC-011: 格式化日期 */
+function formatDate(dateStr: string): string {
+  try {
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+    if (diffDays === 0) return '今天'
+    if (diffDays === 1) return '昨天'
+    if (diffDays < 30) return `${diffDays}天前`
+    return date.toLocaleDateString('zh-CN')
+  } catch {
+    return dateStr
+  }
+}
+
 /** 根据 icon 名称返回对应的图标组件 */
 function getIconComponent(iconName: string): unknown {
   // 当前默认使用 Collection，后续可根据后端返回的 icon 名扩展映射
@@ -224,6 +436,41 @@ function getIconComponent(iconName: string): unknown {
   border: 1px solid var(--border-color);
   background: var(--bg-elevated);
   font-size: 14px;
+}
+
+/* ── Tab 标签页 (REC-006) ── */
+.skills-tabs {
+  margin-bottom: 16px;
+}
+
+.skills-tabs :deep(.el-tabs__header) {
+  margin-bottom: 0;
+}
+
+.skills-tabs :deep(.el-tabs__nav-wrap)::after {
+  background-color: var(--border-color);
+}
+
+.skills-tabs :deep(.el-tabs__item) {
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.skills-tabs :deep(.el-tabs__item.is-active) {
+  color: var(--accent, #42a5f5);
+}
+
+.skills-tabs :deep(.el-tabs__active-bar) {
+  background-color: var(--accent, #42a5f5);
+}
+
+.tab-count {
+  margin-left: 4px;
+  font-size: 11px;
+  padding: 0 6px;
+  height: 18px;
+  line-height: 18px;
 }
 
 .stats-item {
@@ -400,6 +647,23 @@ function getIconComponent(iconName: string): unknown {
   overflow: hidden;
 }
 
+/* ── REC-011: 统计信息 ── */
+.skill-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.stat-item {
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
 /* ── 弹框样式 ── */
 :deep(.skills-dialog.el-dialog) {
   background-color: var(--bg-card) !important;
@@ -436,5 +700,69 @@ function getIconComponent(iconName: string): unknown {
 
 .skills-dialog-modal {
   background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* ── REC-008: ClawHub 搜索模式 ── */
+.clawhub-search-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.clawhub-search-input {
+  width: 100%;
+}
+
+.clawhub-search-input :deep(.el-input__wrapper) {
+  border-radius: 8px;
+}
+
+.clawhub-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.clawhub-scrollbar {
+  height: 60vh;
+}
+
+.clawhub-results-scroll {
+  padding: 4px;
+}
+
+.clawhub-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.clawhub-empty {
+  padding: 16px 0;
+}
+
+/* ClawHub 提示 */
+.clawhub-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+}
+
+.clawhub-hint-icon {
+  color: var(--border-color);
+  margin-bottom: 12px;
+}
+
+.clawhub-hint-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
 }
 </style>
