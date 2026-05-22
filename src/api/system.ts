@@ -12,6 +12,8 @@ export interface SkillInfo {
   updatedAt?: string
   stars?: number
   downloads?: number
+  // REC-018: 技能来源标识
+  source?: 'builtin' | 'clawhub'
   [key: string]: unknown
 }
 
@@ -100,12 +102,14 @@ export interface InstallSkillResult {
   stderr?: string
 }
 
-export async function installSkill(name: string): Promise<InstallSkillResult | null> {
+export async function installSkill(name: string, source?: 'builtin' | 'clawhub'): Promise<InstallSkillResult | null> {
   try {
     const url = import.meta.env.DEV
       ? '/api/system/skills/install'
       : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31002'}/api/system/skills/install`
-    const resp = await axios.post(url, { name }, { timeout: 60000 })
+    const body: Record<string, string> = { name }
+    if (source) body.source = source
+    const resp = await axios.post(url, body, { timeout: 60000 })
     return resp.data as InstallSkillResult
   } catch (e: unknown) {
     console.error('[System] installSkill error:', e)
@@ -135,5 +139,32 @@ export async function searchClawHubSkills(query: string): Promise<SearchSkillsRe
   } catch (e: unknown) {
     console.error('[System] searchClawHubSkills error:', e)
     return null
+  }
+}
+
+/**
+ * 切换技能启用/禁用状态 (REC-022)
+ * 后端接口: POST /api/system/skills/toggle → 端口 31002
+ * 请求体: { name: string, enabled: boolean }
+ * 返回: { success: boolean, message: string, stdout?: string, stderr?: string }
+ */
+export interface ToggleSkillResult {
+  success: boolean
+  message: string
+  stdout?: string
+  stderr?: string
+}
+
+export async function toggleSkill(name: string, enabled: boolean): Promise<ToggleSkillResult | null> {
+  try {
+    const url = import.meta.env.DEV
+      ? '/api/system/skills/toggle'
+      : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31002'}/api/system/skills/toggle`
+    const resp = await axios.post(url, { name, enabled }, { timeout: 60000 })
+    return resp.data as ToggleSkillResult
+  } catch (e: unknown) {
+    console.error('[System] toggleSkill error:', e)
+    const message = (e instanceof Error ? e.message : '切换失败')
+    return { success: false, message }
   }
 }

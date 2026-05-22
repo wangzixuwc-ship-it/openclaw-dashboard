@@ -13,9 +13,16 @@
       <div
         v-for="(msg, idx) in latestMessages"
         :key="idx"
-        class="markdown-body markdown-bubble-item"
-        v-html="renderMessage(msg)"
-      ></div>
+        class="chat-row chat-row-assistant markdown-bubble-item"
+      >
+        <div class="chat-bubble" :class="getBubbleClass(msg)">
+          <div class="bubble-label" v-if="msg.contentType === 'thinking'">💭 思考</div>
+          <div class="bubble-label" v-else-if="msg.contentType === 'toolUse'">🔧 工具调用</div>
+          <div class="bubble-label" v-else-if="msg.contentType === 'toolResult' && msg.isError">⚠️ 工具错误</div>
+          <div class="bubble-label" v-else-if="msg.contentType === 'toolResult'">🔧 工具结果</div>
+          <div class="markdown-body" v-html="renderMessage(msg.content)"></div>
+        </div>
+      </div>
     </div>
 
     <template #reference>
@@ -205,8 +212,14 @@ import {
 
 const props = defineProps<{
   agent: AgentInfo
-  latestMessages?: string[]
+  latestMessages?: BubbleMessage[]
 }>()
+
+interface BubbleMessage {
+  content: string
+  contentType?: string
+  isError?: boolean
+}
 
 const emit = defineEmits<{
   (e: 'detail', agent: AgentInfo): void
@@ -275,6 +288,16 @@ function renderMessage(text: string): string {
 }
 
 const renderedMessage = computed(() => renderMessage(props.latestMessage || ''))
+
+function getBubbleClass(msg: BubbleMessage): string {
+  const ct = msg.contentType ?? 'text'
+  if (ct === 'thinking') return 'bubble-thinking'
+  if (ct === 'toolUse') return 'bubble-tool'
+  if (ct === 'toolResult') {
+    return msg.isError ? 'bubble-tool-error' : 'bubble-tool'
+  }
+  return 'bubble-assistant'
+}
 
 // el-popover 可见性控制
 // REC-080: 完全依赖 store 的 messageBubbles 状态（BUBBLE_DURATION = 20s）
@@ -394,11 +417,102 @@ function openDrawer(): void {
 .bubble-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .markdown-bubble-item {
   animation: bubbleSlideIn 0.3s ease-out;
+}
+
+/* ── Chat row layout ── */
+.chat-row {
+  display: flex;
+}
+
+.chat-row-assistant {
+  justify-content: flex-start;
+}
+
+/* ── Chat bubble ── */
+.chat-bubble {
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── Bubble: assistant (default text) ── */
+.bubble-assistant {
+  background: #2d3748;
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+}
+
+/* ── Bubble: thinking ── */
+.bubble-thinking {
+  background: rgba(255, 193, 7, 0.08);
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+  border-left: 3px solid #ffc107;
+  font-style: italic;
+}
+
+.bubble-thinking .markdown-body {
+  opacity: 0.8;
+}
+
+/* ── Bubble: tool use / tool result ── */
+.bubble-tool {
+  background: rgba(66, 165, 245, 0.12);
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+  border: 1px solid rgba(66, 165, 245, 0.25);
+  border-left: 3px solid #42a5f5;
+  font-size: 11.5px;
+}
+
+/* ── Bubble: tool error ── */
+.bubble-tool-error {
+  background: rgba(244, 67, 54, 0.08);
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+  border-left: 3px solid #f44336;
+  font-size: 11.5px;
+}
+
+/* ── Bubble label (thinking/tool labels) ── */
+.bubble-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  border-radius: 4px;
+  opacity: 0.75;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.bubble-tool .bubble-label {
+  background: rgba(66, 165, 245, 0.2);
+  color: #90caf9;
+  opacity: 0.9;
+}
+
+.bubble-tool-error .bubble-label {
+  background: rgba(244, 67, 54, 0.2);
+  color: #ef9a9a;
+  opacity: 0.9;
+}
+
+.bubble-thinking .bubble-label {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffe082;
+  opacity: 0.85;
 }
 
 /* ==================== Card ==================== */

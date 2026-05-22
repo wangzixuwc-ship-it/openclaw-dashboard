@@ -94,6 +94,8 @@ export const useAgentStore = defineStore('agent', () => {
   interface MessageBubbleData {
     content: string
     timestamp: number
+    contentType: string  // 'text' | 'thinking' | 'toolUse' | 'toolResult' | 'image'
+    isError?: boolean    // for toolResult errors
   }
   const messageBubbles = ref<Record<string, MessageBubbleData[]>>({})
   const lastMessageCount = ref<Record<string, number>>({})
@@ -757,7 +759,12 @@ export const useAgentStore = defineStore('agent', () => {
    * 追加一条 Agent 消息气泡（每个 content part 独立气泡）
    * 按 part 逐条追加，每条独立计时自动消失
    */
-  function updateAgentBubble(agentKey: string, content: string): void {
+  function updateAgentBubble(
+    agentKey: string,
+    content: string,
+    contentType: string = 'text',
+    isError?: boolean,
+  ): void {
     if (!messageBubbles.value[agentKey]) {
       messageBubbles.value[agentKey] = []
     }
@@ -765,6 +772,8 @@ export const useAgentStore = defineStore('agent', () => {
     const entry: MessageBubbleData = {
       content,
       timestamp: Date.now(),
+      contentType,
+      isError,
     }
     messageBubbles.value[agentKey].push(entry)
     // REC-123: 强制触发 Vue 响应式（新增 key 时 ref 对象引用不变）
@@ -860,62 +869,69 @@ export const useAgentStore = defineStore('agent', () => {
     }
 
     // 提取消息的各个 content part（不合并，每条独立返回），用于逐条显示气泡
-    function extractContentParts(msg: Record<string, unknown>): string[] {
+    function extractContentParts(msg: Record<string, unknown>): { content: string; contentType: string; isError?: boolean }[] {
       if (typeof msg?.content === 'string') {
         const c = msg.content as string
-        return c ? [c] : []
+        return c ? [{ content: c, contentType: 'text' }] : []
       }
       if (typeof msg?.content === 'object' && msg.content !== null && !Array.isArray(msg.content)) {
         const c = msg.content as Record<string, unknown>
         const text = typeof c.text === 'string' ? c.text : ''
-        return text ? [text] : []
+        return text ? [{ content: text, contentType: 'text' }] : []
       }
       if (Array.isArray(msg?.content)) {
         const items = msg.content as Array<Record<string, unknown>>
         const parts = items.map(item => {
-          if (!item || typeof item !== 'object') return ''
+          if (!item || typeof item !== 'object') return null
           const t = String(item.type ?? '')
-          if (t === 'text') return (item.text as string) ?? ''
-          if (t === 'thinking') return `💭 ${(item.thinking as string) ?? ''}`
+          if (t === 'text') {
+            const text = (item.text as string) ?? ''
+            return text ? { content: text, contentType: 'text' as const } : null
+          }
+          if (t === 'thinking') {
+            const thinking = (item.thinking as string) ?? ''
+            return thinking ? { content: thinking, contentType: 'thinking' as const } : null
+          }
           if (t === 'tool_use') {
             const name = String(item.name ?? '')
-            if (name) return `[🔧 ${name}]`
+            if (name) return { content: name, contentType: 'toolUse' as const }
             const input = item.input
-            if (typeof input === 'string' && input) return `[🔧 工具调用]`
-            if (typeof input === 'object' && input !== null) return `[🔧 工具调用]`
-            return ''
+            if (typeof input === 'string' && input) return { content: '工具调用', contentType: 'toolUse' as const }
+            if (typeof input === 'object' && input !== null) return { content: '工具调用', contentType: 'toolUse' as const }
+            return null
           }
           if (t === 'tool_result') {
             const name = String(item.name ?? '')
             const isError = item.is_error === true
             const resultContent = item.content
+            let text = ''
             if (isError) {
-              if (typeof item.error === 'string' && item.error)
-                return `[⚠️ ${name || '错误'}] ${item.error}`
-              if (typeof resultContent === 'string' && resultContent)
-                return `[⚠️ ${name || '错误'}] ${resultContent}`
-              if (Array.isArray(resultContent)) {
+              if (typeof item.error === 'string' && item.error) text = item.error
+              else if (typeof resultContent === 'string' && resultContent) text = resultContent
+              else if (Array.isArray(resultContent)) {
                 const textParts = resultContent
                   .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
                   .map((r: any) => r.text)
-                if (textParts.length > 0) return `[⚠️ ${name || '错误'}] ${textParts.join('\n')}`
+                if (textParts.length > 0) text = textParts.join('\n')
               }
             }
-            if (Array.isArray(resultContent)) {
+            if (!text && Array.isArray(resultContent)) {
               const textParts = resultContent
                 .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
                 .map((r: any) => r.text)
               if (textParts.length > 0) {
-                return `[🔧 ${name || '结果'}] ${textParts.join('\n').slice(0, 200)}`
+                text = textParts.join('\n').slice(0, 200)
               }
             }
-            if (typeof item.text === 'string' && item.text) return `[🔧 ${name || '结果'}] ${item.text}`
-            if (name) return `[🔧 ${name}]`
-            return `[🔧 工具结果]`
+            if (!text && typeof item.text === 'string' && item.text) text = item.text
+            if (!text) text = '[工具结果]'
+            
+            const displayContent = (name ? `${name}\n` : '') + text
+            return { content: displayContent, contentType: 'toolResult' as const, isError }
           }
-          return ''
-        }).filter(s => s && s !== '[tool_code]')
-        return parts
+          return null
+        }).filter(s => s !== null)
+        return parts as { content: string; contentType: string; isError?: boolean }[]
       }
       return []
     }
@@ -963,9 +979,9 @@ export const useAgentStore = defineStore('agent', () => {
             if (role === 'user' || role === 'assistant' || role === 'agent' || role === 'tool') {
               const parts = extractContentParts(msg)
               for (const part of parts) {
-                if (part && !isSystemMessage(part)) {
-                  console.log(`[REC-085] ✅ agent=${agent.key} 显示 part:`, part.slice(0, 150))
-                  updateAgentBubble(agent.key, part)
+                if (part.content && !isSystemMessage(part.content)) {
+                  console.log(`[REC-085] ✅ agent=${agent.key} 显示 part [${part.contentType}]:`, part.content.slice(0, 150))
+                  updateAgentBubble(agent.key, part.content, part.contentType, part.isError)
                   found = true
                 }
               }
@@ -988,9 +1004,9 @@ export const useAgentStore = defineStore('agent', () => {
   /**
    * 获取指定 Agent 的全部气泡消息数组
    */
-  function getAgentBubbles(agentKey: string): string[] {
+  function getAgentBubbles(agentKey: string): MessageBubbleData[] {
     const arr = messageBubbles.value[agentKey]
-    return arr ? arr.map(e => e.content) : []
+    return arr ? arr.map(e => ({ content: e.content, contentType: e.contentType, isError: e.isError })) : []
   }
 
   /**

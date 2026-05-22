@@ -16,18 +16,22 @@
           <!-- 视图切换 (removed REC-067: project monitor removed) -->
 
           <!-- Gateway Version -->
-          <div class="indicator indicator-version" @click="versionDialogVisible = true" style="cursor: pointer;">
-            <span class="indicator-label">OpenClaw</span>
-            <span class="indicator-value">{{ store.gatewayVersion || '未知' }}</span>
-          </div>
+          <el-tooltip content="切换版本" placement="bottom">
+            <div class="indicator indicator-version" @click="versionDialogVisible = true" style="cursor: pointer;">
+              <span class="indicator-label">OpenClaw</span>
+              <span class="indicator-value">{{ store.gatewayVersion || '未知' }}</span>
+            </div>
+          </el-tooltip>
 
           <!-- Gateway Health (REC-004: 布局合并，保持原有样式) -->
-          <div class="indicator" :class="healthClass" @click="doctorDialogVisible = true">
-            <el-icon :size="14"><component :is="healthIcon" /></el-icon>
-            <span class="indicator-label">网关</span>
-            <span>{{ healthDisplay }}</span>
-            <span v-if="store.healthStatus === 'unhealthy'"> 点击诊断</span>
-          </div>
+          <el-tooltip content="诊断网关" placement="bottom">
+            <div class="indicator" :class="healthClass" @click="doctorDialogVisible = true">
+              <el-icon :size="14"><component :is="healthIcon" /></el-icon>
+              <span class="indicator-label">网关</span>
+              <span>{{ healthDisplay }}</span>
+              <span v-if="store.healthStatus === 'unhealthy'"> 点击诊断</span>
+            </div>
+          </el-tooltip>
 
           <!-- GPU VRAM Usage (REC-091) -->
           <el-tooltip
@@ -44,13 +48,15 @@
           </el-tooltip>
 
            <!-- Skills Button (REC-005: 替换"刷新"按钮) -->
-          <el-button
-            :icon="Briefcase"
-            circle
-            size="small"
-            @click="skillsDialogVisible = true"
-            class="refresh-btn"
-          />
+          <el-tooltip content="技能库" placement="bottom">
+            <el-button
+              :icon="Briefcase"
+              circle
+              size="small"
+              @click="skillsDialogVisible = true"
+              class="refresh-btn"
+            />
+          </el-tooltip>
         </div>
       </div>
     </header>
@@ -288,6 +294,7 @@ import {
   QuestionFilled,
   Briefcase
 } from '@element-plus/icons-vue'
+import { el } from 'element-plus/es/locale/index.mjs'
 
 // App version from package.json (injected by Vite define)
 const APP_VERSION: string = __APP_VERSION__

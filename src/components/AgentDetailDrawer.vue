@@ -499,7 +499,7 @@ function escapeHtml(text: string): string {
  * 返回 [{ contentType, content }, ...]
  * 与 agent.ts 中 checkNewMessages()->extractContent() 逻辑保持一致
  */
-function splitContentParts(content: unknown): { contentType: string; content: string }[] {
+function splitContentParts(content: unknown): { contentType: string; content: string; isError?: boolean }[] {
   // 1. 字符串：整体作为一个 text 片段
   if (typeof content === 'string') {
     return [{ contentType: 'text', content }]
@@ -632,6 +632,7 @@ async function loadHistory(silent: boolean = false, scrollToEnd: boolean = true)
     historyCount.value = history.length
 
     const normalized = (history as Record<string, unknown>[]).flatMap((raw) => {
+
       const item = (raw && typeof raw === 'object' && raw.message && typeof raw.message === 'object'
         ? (raw.message as Record<string, unknown>)
         : raw) as Record<string, unknown>
@@ -639,14 +640,20 @@ async function loadHistory(silent: boolean = false, scrollToEnd: boolean = true)
       const parts = splitContentParts(item.content)
 
       return parts.map((part) => {
+
         let content = part.content
         if (role === 'assistant') {
           content = cleanContent(content)
+        }
+        
+        if(role === 'toolresult'){
+          part.contentType = 'toolResult'  
         }
 
         const bubbleRole = part.contentType === 'thinking' ? 'thinking'
           : (part.contentType === 'toolUse' || part.contentType === 'toolResult') ? 'tool'
             : (['user', 'assistant', 'system'].includes(role) ? role : 'assistant')
+
 
         return {
           role: bubbleRole,
@@ -1134,11 +1141,12 @@ watch(recentMessages, () => {
   opacity: 0.8;
 }
 
-/* 工具调用 / 工具结果：蓝色左边框，半透明背景 */
+/* 工具调用 / 工具结果：浅灰蓝色背景 + 左边框 */
 .bubble-tool {
-  background: rgba(66, 165, 245, 0.08);
+  background: rgba(66, 165, 245, 0.12);
   color: #e2e8f0;
   border-bottom-left-radius: 4px;
+  border: 1px solid rgba(66, 165, 245, 0.25);
   border-left: 3px solid #42a5f5;
   font-size: 12.5px;
 }
@@ -1162,12 +1170,36 @@ watch(recentMessages, () => {
 
 /* 气泡内标签（思考/工具调用/工具结果） */
 .bubble-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  margin-bottom: 6px;
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 4px;
-  opacity: 0.6;
+  letter-spacing: 0.3px;
+  border-radius: 4px;
+  opacity: 0.75;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 工具调用/结果标签更明显的背景 */
+.bubble-tool .bubble-label {
+  background: rgba(66, 165, 245, 0.2);
+  color: #90caf9;
+  opacity: 0.9;
+}
+
+.bubble-tool-error .bubble-label {
+  background: rgba(244, 67, 54, 0.2);
+  color: #ef9a9a;
+  opacity: 0.9;
+}
+
+.bubble-thinking .bubble-label {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffe082;
+  opacity: 0.85;
 }
 
 

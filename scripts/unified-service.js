@@ -1944,7 +1944,7 @@ const server = http.createServer(async (req, res) => {
         const parsed = JSON.parse(jsonStr)
         const skills = parsed.skills || []
 
-        // 为每个技能增强 installed 和 enabled 状态字段
+        // 为每个技能增强 installed、enabled 和 source 字段
         const skillsWithStatus = skills.map(skill => ({
           ...skill,
           installed: (() => {
@@ -1955,7 +1955,8 @@ const server = http.createServer(async (req, res) => {
               && (m.config || []).length === 0
               && (m.os || []).length === 0
           })(),
-          enabled: skill.disabled !== true
+          enabled: skill.disabled !== true,
+          source: skill.source === 'openclaw-bundled' ? 'builtin' : 'clawhub'
         }))
 
         const ready = skillsWithStatus.filter(s => s.eligible).length
@@ -2200,6 +2201,112 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // POST /api/system/skills/toggle — 启用/禁用技能
+  // ============================================
+
+  if (pathname === '/api/system/skills/toggle' && req.method === 'POST') {
+    let body = ''
+    let bodyExceeded = false
+    const MAX_BODY_SIZE = 1024
+
+    req.on('data', chunk => {
+      body += chunk.toString()
+      if (body.length > MAX_BODY_SIZE && !bodyExceeded) {
+        bodyExceeded = true
+        req.destroy()
+      }
+    })
+    req.on('end', async () => {
+      if (bodyExceeded) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: false,
+          message: '请求体过大（限制 1KB）'
+        }))
+        return
+      }
+      try {
+        const input = JSON.parse(body)
+        const { name, enabled } = input
+
+        // 参数验证
+        if (!name || typeof name !== 'string' || !name.trim()) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: false,
+            message: '缺少 name 参数'
+          }))
+          return
+        }
+        if (typeof enabled !== 'boolean') {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: false,
+            message: 'enabled 参数必须为布尔值'
+          }))
+          return
+        }
+
+        const skillName = name.trim()
+
+        // 路径遍历防护
+        if (/(\.\.[\\/]|^\.+$)/.test(skillName)) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: false,
+            message: '技能名称包含非法路径'
+          }))
+          return
+        }
+
+        // 读取 openclaw.json
+        const openclawJsonPath = path.join(os.homedir(), '.openclaw', 'openclaw.json')
+        const content = await fs.readFile(openclawJsonPath, 'utf-8')
+        const config = JSON.parse(content)
+
+        // 确保 skills.entries 存在
+        if (!config.skills) config.skills = {}
+        if (!config.skills.entries) config.skills.entries = {}
+
+        // 检查技能是否存在
+        if (!config.skills.entries[skillName]) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: false,
+            message: `技能 "${skillName}" 不存在于配置中`
+          }))
+          return
+        }
+
+        // 修改 enabled 字段
+        config.skills.entries[skillName].enabled = enabled
+
+        // 原子写入：.tmp + rename
+        const tmpPath = openclawJsonPath + '.tmp'
+        await fs.writeFile(tmpPath, JSON.stringify(config, null, 2), 'utf-8')
+        await fs.rename(tmpPath, openclawJsonPath)
+
+        console.log(`[Skills Toggle] ${skillName} → enabled: ${enabled}`)
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          name: skillName,
+          enabled
+        }))
+      } catch (error) {
+        console.error('[Skills Toggle] 失败:', error.message)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: false,
+          message: error.message
+        }))
+      }
+    })
+    return
+  }
+
+  // ============================================
   // POST /api/system/doctor — 执行 openclaw doctor 诊断
   // ============================================
 
@@ -2262,6 +2369,7 @@ server.listen(PORT, () => {
   console.log('  GET  /api/tasks/current           - 获取当前任务进度')
   console.log('  GET  /api/system/skills           - 获取技能列表')
   console.log('  POST /api/system/skills/install   - 安装技能')
+  console.log('  POST /api/system/skills/toggle    - 启用/禁用技能')
   console.log('  GET  /api/system/skills/search    - 搜索 ClawHub 技能')
   console.log('  POST /api/system/doctor          - 执行 openclaw doctor 诊断')
   console.log('  POST /reset                     - 重置 Agent')

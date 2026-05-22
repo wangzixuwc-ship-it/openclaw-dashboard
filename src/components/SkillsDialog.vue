@@ -39,10 +39,16 @@
 
     <!-- Tab 标签页 (REC-006) -->
     <el-tabs v-else-if="skillsData?.skills.length" v-model="activeTab" class="skills-tabs">
-      <el-tab-pane name="installed">
+      <el-tab-pane name="activated">
         <template #label>
-          <span>已安装</span>
-          <el-tag size="small" type="success" class="tab-count">{{ installedSkills.length }}</el-tag>
+          <span>已激活</span>
+          <el-tag size="small" type="success" class="tab-count">{{ activatedSkills.length }}</el-tag>
+        </template>
+      </el-tab-pane>
+      <el-tab-pane name="deactivated">
+        <template #label>
+          <span>未激活</span>
+          <el-tag size="small" type="info" class="tab-count">{{ deactivatedSkills.length }}</el-tag>
         </template>
       </el-tab-pane>
       <el-tab-pane name="notInstalled">
@@ -159,27 +165,51 @@
           class="skill-card"
           shadow="hover"
         >
-          <!-- 右上角状态标识 (REC-006/REC-012) -->
+          <!-- 右上角状态标识 (REC-006/REC-012/REC-022) -->
           <div class="skill-status-badges">
             <!-- REC-012: 已安装显示启用状态，未安装显示安装按钮 -->
-            <el-button
-              v-if="!skill.installed"
-              size="small"
-              type="primary"
-              plain
-              @click="handleInstall(skill.name)"
-              :loading="installingSkills.get(skill.name)"
-              :disabled="installingSkills.get(skill.name)"
-              class="install-skill-btn"
-            >
-              <template #icon>
-                <el-icon><Download /></el-icon>
-              </template>
-              安装
-            </el-button>
-            <span v-if="skill.installed" class="status-badge" :class="skill.enabled ? 'badge-enabled' : 'badge-not-enabled'">
-              {{ skill.enabled ? '🟢 已启用' : '⚪ 未启用' }}
-            </span>
+            <div class="install-btn-group">
+              <el-button
+                v-if="!skill.installed"
+                size="small"
+                type="primary"
+                plain
+                @click="handleInstall(skill)"
+                :loading="installingSkills.get(skill.name)"
+                :disabled="installingSkills.get(skill.name)"
+                class="install-skill-btn"
+              >
+                <template #icon>
+                  <el-icon><Download /></el-icon>
+                </template>
+                安装
+              </el-button>
+            </div>
+            <!-- REC-022: 已安装技能显示启用/禁用按钮 -->
+            <template v-if="skill.installed">
+              <el-button
+                v-if="skill.enabled"
+                size="small"
+                type="danger"
+                @click="handleToggle(skill.name, false)"
+                :loading="togglingSkills.get(skill.name)"
+                :disabled="togglingSkills.get(skill.name)"
+                class="toggle-skill-btn"
+              >
+                禁用
+              </el-button>
+              <el-button
+                v-else
+                size="small"
+                type="success"
+                @click="handleToggle(skill.name, true)"
+                :loading="togglingSkills.get(skill.name)"
+                :disabled="togglingSkills.get(skill.name)"
+                class="toggle-skill-btn"
+              >
+                启用
+              </el-button>
+            </template>
           </div>
 
           <div class="skill-card-inner">
@@ -225,7 +255,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
-import { getSkills, installSkill, searchClawHubSkills, type SkillsResponse, type SkillInfo } from '../api/system'
+import { getSkills, installSkill, searchClawHubSkills, toggleSkill, type SkillsResponse, type SkillInfo } from '../api/system'
 import { ElMessage } from 'element-plus'
 import {
   Loading,
@@ -254,9 +284,11 @@ const loading = ref(false)
 const skillsData = ref<SkillsResponse | null>(null)
 // REC-012: 安装中状态跟踪（按 skill name 区分）
 const installingSkills = ref<Map<string, boolean>>(new Map())
+// REC-022: 切换中状态跟踪
+const togglingSkills = ref<Map<string, boolean>>(new Map())
 
 // REC-006: Tab 标签页状态
-const activeTab = ref('installed')
+const activeTab = ref('activated')
 
 // REC-008: ClawHub 搜索状态
 const searchQuery = ref('')
@@ -267,6 +299,16 @@ const hasSearched = ref(false)
 /** 已安装技能 (installed === true) */
 const installedSkills = computed(() => {
   return skillsData.value?.skills.filter(s => s.installed) ?? []
+})
+
+/** 已激活技能 (installed === true && enabled === true) */
+const activatedSkills = computed(() => {
+  return installedSkills.value.filter(s => s.enabled) ?? []
+})
+
+/** 未激活技能 (installed === true && enabled === false) */
+const deactivatedSkills = computed(() => {
+  return installedSkills.value.filter(s => !s.enabled) ?? []
 })
 
 /** 未安装技能 (installed === false) */
@@ -289,8 +331,10 @@ const installedNames = computed(() => {
 /** 根据当前 tab 返回筛选后的技能列表 */
 const filteredSkills = computed(() => {
   switch (activeTab.value) {
-    case 'installed':
-      return installedSkills.value
+    case 'activated':
+      return activatedSkills.value
+    case 'deactivated':
+      return deactivatedSkills.value
     case 'notInstalled':
       return notInstalledSkills.value
     case 'clawhub':
@@ -365,17 +409,27 @@ function onClearSearch(): void {
 }
 
 /**
- * REC-012: 安装技能
+ * REC-012/REC-018/REC-024: 安装技能
+ * - 内置技能 (source === 'builtin') → 调用后端 /api/system/skills/install (openclaw skills install)
+ * - ClawHub 技能 (source === 'clawhub') → 调用后端 /api/system/skills/install (npx clawhub install)
+ * - 兼容旧调用: handleInstall('skillName') 或 handleInstall(skillObject)
+ * - REC-024: 安装成功后刷新技能列表 + ClawHub 搜索结果
  */
-async function handleInstall(skillName: string): Promise<void> {
+async function handleInstall(skill: SkillInfo | string): Promise<void> {
+  const skillName = typeof skill === 'string' ? skill : skill.name
+  const source = typeof skill === 'string' ? undefined : skill.source
+  const wasClawHubTab = activeTab.value === 'clawhub'
   installingSkills.value.set(skillName, true)
   try {
-    const result = await installSkill(skillName)
+    const result = await installSkill(skillName, source)
     if (result?.success) {
       ElMessage.success(`"${skillName}" 安装成功`)
-      // 先移除安装中标记，再刷新列表，减少 UI 闪烁
       installingSkills.value.delete(skillName)
       await fetchSkills()
+      // REC-024: 刷新 ClawHub 搜索结果，让刚安装的技能显示为"已安装"
+      if (wasClawHubTab && hasSearched.value && searchQuery.value.trim()) {
+        await searchSkills(searchQuery.value.trim())
+      }
     } else {
       ElMessage.error(result?.message ?? `安装 "${skillName}" 失败`)
     }
@@ -384,6 +438,28 @@ async function handleInstall(skillName: string): Promise<void> {
     ElMessage.error(`安装 "${skillName}" 异常`)
   } finally {
     installingSkills.value.delete(skillName)
+  }
+}
+
+/**
+ * REC-022: 切换技能启用/禁用状态
+ */
+async function handleToggle(skillName: string, enabled: boolean): Promise<void> {
+  togglingSkills.value.set(skillName, true)
+  try {
+    const result = await toggleSkill(skillName, enabled)
+    if (result?.success) {
+      ElMessage.success(`"${skillName}" 已${enabled ? '启用' : '禁用'}`)
+      togglingSkills.value.delete(skillName)
+      await fetchSkills()
+    } else {
+      ElMessage.error(result?.message ?? `切换 "${skillName}" 状态失败`)
+    }
+  } catch (e: unknown) {
+    console.error('[SkillsDialog] toggle error:', e)
+    ElMessage.error(`切换 "${skillName}" 状态异常`)
+  } finally {
+    togglingSkills.value.delete(skillName)
   }
 }
 
@@ -590,6 +666,30 @@ function getIconComponent(iconName: string): unknown {
 
 .install-skill-btn :deep(.el-icon) {
   font-size: 11px;
+}
+
+/* REC-022: 启用/禁用按钮样式 */
+.toggle-skill-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  height: auto;
+  line-height: 1;
+}
+
+/* REC-018: 安装按钮组 + 来源标签 */
+.install-btn-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.source-tag {
+  font-size: 10px;
+  padding: 0 4px;
+  height: 16px;
+  line-height: 16px;
+  opacity: 0.8;
 }
 
 .skill-card-inner {
