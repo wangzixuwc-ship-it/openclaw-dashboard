@@ -49,6 +49,11 @@ export default defineConfig(({ mode }) => {
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },
+        '/api/agent-running-status': {
+          // Agent 运行状态检测（基于 session 文件 mtime，端口 31002）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
         '/api': {
           target: gatewayUrl,
           changeOrigin: true,

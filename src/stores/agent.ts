@@ -47,14 +47,24 @@ export interface AgentInfo {
   errorMessage?: string
   state?: string
   status_api?: string
+  emoji?: string
+  historicalTokens?: number  // 从 byAgent 统计的历史总 token
+}
+
+export interface ModelUsage {
+  tokens: number
+  cost: number
 }
 
 export interface GlobalUsage {
   totalTokens: number
   totalCost: number
   updatedAt: string
-  startTime?: string  // Gateway or service start time (for uptime calculation)
-  uptimeMs?: number   // Service uptime in milliseconds
+  startTime?: string
+  uptimeMs?: number
+  byModel?: Record<string, ModelUsage>
+  byAgentByModel?: Record<string, Record<string, ModelUsage>>
+  byAgent?: Record<string, { tokens: number; cost: number; sessionCount: number }>
 }
 
 export interface ImageAttachment {
@@ -394,40 +404,58 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function fetchAgents(): Promise<void> {
     try {
-      // 同时拉两个数据源：活跃会话 + 已配置 agent 列表
-      const [sessionsData, configuredResp] = await Promise.all([
+      // 同时拉三个数据源：活跃会话 + 已配置 agent 列表 + 文件 mtime 运行状态
+      const [sessionsData, configuredResp, runningResp] = await Promise.all([
         sessionsList(),
         fetch('/api/agents-configured').then(r => r.ok ? r.json() : { agents: [] }).catch(() => ({ agents: [] })),
+        fetch('/api/agent-running-status').then(r => r.ok ? r.json() : { agents: [] }).catch(() => ({ agents: [] })),
       ])
 
       const sessions = Array.isArray((sessionsData as any).sessions) ? (sessionsData as any).sessions : []
       const configuredAgents = Array.isArray(configuredResp?.agents) ? configuredResp.agents : []
 
-      // 先把活跃会话规范化（带运行状态）
-      const sessionAgents = sessions.map(normalizeAgent)
+      // 构建运行状态 map（基于 session 文件 mtime，90秒内有写入 = running）
+      const runningStatusMap = new Map<string, AgentStatus>()
+      for (const ra of (Array.isArray(runningResp?.agents) ? runningResp.agents : [])) {
+        if (ra.id && ra.status) runningStatusMap.set(ra.id as string, ra.status as AgentStatus)
+      }
+
+      // 规范化 sessions_list 返回的会话；若 mtime 显示 running 则强制覆盖 done 状态
+      const sessionAgents = sessions.map((s: any) => {
+        const agent = normalizeAgent(s)
+        const agentId = (agent.key || '').split(':')[1] || ''
+        if (runningStatusMap.get(agentId) === 'running' && agent.status !== 'running') {
+          agent.status = 'running'
+        }
+        return agent
+      })
+
       const sessionAgentIds = new Set(sessionAgents.map((a: AgentInfo) => {
         // session key 格式: agent:{agentId}:{sessionId}
         const parts = (a.key || '').split(':')
         return parts[1] || ''
       }).filter(Boolean))
 
-      // 把"已配置但当前无活跃会话"的 agent 补成 idle 卡片
+      // 已配置但无 webchat 会话的 agent → 使用文件 mtime 实时状态（替代硬编码 idle）
       const configuredOnlyAgents: AgentInfo[] = configuredAgents
         .filter((c: any) => !sessionAgentIds.has(c.id))
         .map((c: any) => ({
           key: `agent:${c.id}:main`,
           name: c.name || c.id,
           displayName: c.emoji ? `${c.emoji} ${c.name}` : c.name,
-          status: 'idle' as AgentStatus,
+          status: (runningStatusMap.get(c.id) || 'idle') as AgentStatus,
           lastActivity: 0,
           model: c.model,
           kind: 'configured',
           channel: 'none',
+          emoji: c.emoji || '',
+          historicalTokens: globalUsage.value.byAgent?.[c.id]?.tokens || 0,
         }))
 
       agents.value = [...sessionAgents, ...configuredOnlyAgents]
       lastUpdateTime.value = Date.now()
-      console.log(`[AgentStore] sessions=${sessions.length} configured=${configuredAgents.length} total=${agents.value.length}`)
+      const runningIds = [...runningStatusMap.entries()].filter(([, v]) => v === 'running').map(([k]) => k)
+      console.log(`[AgentStore] sessions=${sessions.length} configured=${configuredAgents.length} running=[${runningIds.join(',') || 'none'}] total=${agents.value.length}`)
     } catch (e) {
       console.error('[AgentStore] fetchAgents error:', e)
       agents.value = []
@@ -451,8 +479,11 @@ export const useAgentStore = defineStore('agent', () => {
         totalTokens: data.totalTokens || 0,
         totalCost: data.totalCost || 0,
         updatedAt: data.updatedAt || '',
-        startTime: (data as any).startTime,  // Extract start time if available
-        uptimeMs: (data as any).uptimeMs,    // Extract uptime if available
+        startTime: (data as any).startTime,
+        uptimeMs: (data as any).uptimeMs,
+        byModel: data.byModel,
+        byAgentByModel: data.byAgentByModel,
+        byAgent: data.byAgent,
       }
       console.log('[AgentStore] Global usage loaded:', data.totalTokens, 'tokens, cost:', data.totalCost)
 
@@ -682,6 +713,11 @@ export const useAgentStore = defineStore('agent', () => {
   function getAgentByKey(key: string): AgentInfo | null {
     const agent = agents.value.find((a) => a.key === key)
     return agent || null
+  }
+
+  /** 获取指定 agent 的历史总 token 用量 */
+  function getAgentHistoricalTokens(agentId: string): number {
+    return globalUsage.value.byAgent?.[agentId]?.tokens || 0
   }
 
   async function fetchSessionHistory(sessionKey: string, limit: number = 100): Promise<Record<string, unknown>[]> {
@@ -963,6 +999,7 @@ export const useAgentStore = defineStore('agent', () => {
     formatDuration,
     formatCost,
     getAgentByKey,
+    getAgentHistoricalTokens,
     fetchAgents,
     fetchAgentStatus,
     fetchGlobalUsage,

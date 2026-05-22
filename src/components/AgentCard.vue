@@ -22,7 +22,16 @@
         <div class="card-header">
           <div class="agent-identity">
             <div class="agent-avatar" :class="statusColorClass">
-              <el-icon :size="18"><component :is="avatarIcon" /></el-icon>
+              <!-- 优先显示图片头像，失败则降级到 emoji，再降级到图标 -->
+              <img
+                v-if="avatarSrc"
+                :src="avatarSrc"
+                :alt="displayName"
+                class="avatar-img"
+                @error="onAvatarError"
+              />
+              <span v-else-if="agent.emoji" class="avatar-emoji">{{ agent.emoji }}</span>
+              <el-icon v-else :size="18"><component :is="avatarIcon" /></el-icon>
             </div>
             <span class="agent-name" :title="displayName">{{ displayName }}</span>
           </div>
@@ -50,12 +59,22 @@
               <span class="meta-label">持续时间</span>
               <span class="meta-value duration">{{ durationText }}</span>
             </div>
+
+            <div class="meta-item" v-if="historicalTokens > 0">
+              <span class="meta-label">历史 Token</span>
+              <span class="meta-value hist-token">{{ formatHistoricalTokens(historicalTokens) }}</span>
+            </div>
+
+            <div class="meta-item" v-if="agent.model">
+              <span class="meta-label">模型</span>
+              <span class="meta-value model-tag" :title="agent.model">{{ shortModelName }}</span>
+            </div>
           </div>
 
           <!-- Token Usage Progress Bar -->
           <div class="token-section" v-if="agent.tokenUsage">
             <div class="token-header">
-              <span class="meta-label">Token 用量</span>
+              <span class="meta-label">上下文用量</span>
               <span class="token-percent" :class="percentageClass">{{ tokenPercent }}%</span>
             </div>
             <el-progress
@@ -88,7 +107,15 @@
     <div class="card-header">
       <div class="agent-identity">
         <div class="agent-avatar" :class="statusColorClass">
-          <el-icon :size="18"><component :is="avatarIcon" /></el-icon>
+          <img
+            v-if="avatarSrc"
+            :src="avatarSrc"
+            :alt="displayName"
+            class="avatar-img"
+            @error="onAvatarError"
+          />
+          <span v-else-if="agent.emoji" class="avatar-emoji">{{ agent.emoji }}</span>
+          <el-icon v-else :size="18"><component :is="avatarIcon" /></el-icon>
         </div>
         <span class="agent-name" :title="displayName">{{ displayName }}</span>
       </div>
@@ -116,12 +143,24 @@
           <span class="meta-label">持续时间</span>
           <span class="meta-value duration">{{ durationText }}</span>
         </div>
+
+        <!-- 历史 Token 用量 -->
+        <div class="meta-item" v-if="historicalTokens > 0">
+          <span class="meta-label">历史 Token</span>
+          <span class="meta-value hist-token">{{ formatHistoricalTokens(historicalTokens) }}</span>
+        </div>
+
+        <!-- 使用模型 -->
+        <div class="meta-item" v-if="agent.model">
+          <span class="meta-label">模型</span>
+          <span class="meta-value model-tag" :title="agent.model">{{ shortModelName }}</span>
+        </div>
       </div>
 
-      <!-- Token Usage Progress Bar -->
+      <!-- Token Usage Progress Bar (当前 session) -->
       <div class="token-section" v-if="agent.tokenUsage">
         <div class="token-header">
-          <span class="meta-label">Token 用量</span>
+          <span class="meta-label">上下文用量</span>
           <span class="token-percent" :class="percentageClass">{{ tokenPercent }}%</span>
         </div>
         <el-progress
@@ -167,6 +206,59 @@ const emit = defineEmits<{
 }>()
 
 const store = useAgentStore()
+
+// ========== 头像 ==========
+// 从 agent key 提取 agentId（如 agent:main:xxx → main）
+const agentId = computed(() => {
+  const parts = (props.agent.key || '').split(':')
+  return (parts[0] === 'agent' && parts.length >= 2) ? parts[1] : parts[0]
+})
+
+// 优先级：.env VITE_AGENT_{ID}_AVATAR > public/avatars/{id}.jpg
+const envAvatar = computed(() => {
+  const idUpper = agentId.value.replace(/-/g, '_').toUpperCase()
+  const envKey = `VITE_AGENT_${idUpper}_AVATAR`
+  return (import.meta.env as Record<string, string>)[envKey] || ''
+})
+
+const avatarLoadFailed = ref(false)
+
+const avatarSrc = computed(() => {
+  if (avatarLoadFailed.value) return ''
+  if (envAvatar.value) return envAvatar.value
+  return `/avatars/${agentId.value}.jpg`
+})
+
+function onAvatarError() {
+  avatarLoadFailed.value = true
+}
+
+// ========== 历史 Token ==========
+const historicalTokens = computed(() => {
+  return props.agent.historicalTokens || store.getAgentHistoricalTokens(agentId.value)
+})
+
+function formatHistoricalTokens(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
+  return n.toString()
+}
+
+// ========== 模型简称 ==========
+const MODEL_SHORT: Record<string, string> = {
+  'deepseek-v4-pro': 'DeepSeek V4',
+  'deepseek-v3': 'DeepSeek V3',
+  'MiniMax-M2.7': 'MiniMax',
+  'claude-sonnet-4-6': 'Claude Sonnet',
+  'claude-sonnet-4-5': 'Claude Sonnet',
+  'claude-opus-4': 'Claude Opus',
+  'gpt-4o': 'GPT-4o',
+  'gpt-4o-mini': 'GPT-4o Mini',
+}
+const shortModelName = computed(() => {
+  const m = props.agent.model || ''
+  return MODEL_SHORT[m] || m.split('/').pop() || m
+})
 
 const renderedMessage = computed(() => {
   if (!props.latestMessage) return ''
@@ -491,5 +583,31 @@ function openDrawer(): void {
 
 .markdown-bubble {
   animation: bubbleSlideIn 0.3s ease-out;
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.avatar-emoji {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.hist-token {
+  font-variant-numeric: tabular-nums;
+  color: #f59e0b;
+  font-weight: 500;
+}
+
+.model-tag {
+  font-size: 11px;
+  color: var(--text-secondary, #94a3b8);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 1px 5px;
 }
 </style>

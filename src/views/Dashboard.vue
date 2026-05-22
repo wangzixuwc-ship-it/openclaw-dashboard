@@ -65,6 +65,7 @@
           class="stat-card"
           :class="stat.class"
           shadow="hover"
+          @click="stat.onClick?.()"
         >
           <div class="stat-card-inner">
             <div class="stat-icon-wrap" :class="stat.iconClass">
@@ -72,7 +73,10 @@
             </div>
             <div class="stat-text">
               <div class="stat-number">{{ stat.value }}</div>
-              <div class="stat-label">{{ stat.label }}</div>
+              <div class="stat-label">
+                {{ stat.label }}
+                <span v-if="stat.subtitle" class="stat-subtitle">{{ stat.subtitle }}</span>
+              </div>
             </div>
           </div>
         </el-card>
@@ -205,6 +209,9 @@
       v-model:visible="drawerVisible"
       :agent-data="selectedAgent"
     />
+
+    <!-- Token 消耗详情弹窗 -->
+    <TokenDetailDialog v-model:visible="tokenDetailVisible" />
   </div>
 </template>
 
@@ -213,6 +220,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAgentStore, type AgentInfo } from '../stores/agent'
 import AgentCard from '../components/AgentCard.vue'
 import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
+import TokenDetailDialog from '../components/TokenDetailDialog.vue'
 import ProjectMonitor from './ProjectMonitor.vue'
 import {
   Monitor,
@@ -254,6 +262,9 @@ function updateClock(): void {
 // Drawer
 const drawerVisible = ref(false)
 const selectedAgent = ref<AgentInfo | null>(null)
+
+// Token 详情弹窗
+const tokenDetailVisible = ref(false)
 
 // Stats cards
 const statsCards = computed(() => [
@@ -302,18 +313,34 @@ const statsCards = computed(() => [
   {
     label: '历史消耗Token',
     value: (store.totalTokensUsed || 0).toLocaleString(),
+    subtitle: topModelSummary.value,
     icon: Odometer,
     iconClass: 'icon-orange',
-    class: 'stat-tokens',
+    class: 'stat-tokens stat-clickable',
+    onClick: () => { tokenDetailVisible.value = true },
   },
   {
     label: '本次运行费用',
     value: store.formatCost(store.totalCostCny),
+    subtitle: '',
     icon: Money,
     iconClass: 'icon-green',
-    class: 'stat-cost',
+    class: 'stat-cost stat-clickable',
+    onClick: () => { tokenDetailVisible.value = true },
   },
 ])
+
+// Token 卡片的模型摘要（最多显示 2 个主要模型）
+const topModelSummary = computed(() => {
+  const byModel = store.globalUsage.byModel
+  if (!byModel) return ''
+  const sorted = Object.entries(byModel).sort((a, b) => b[1].tokens - a[1].tokens)
+  const names: Record<string, string> = {
+    'deepseek-v4-pro': 'DeepSeek', 'MiniMax-M2.7': 'MiniMax',
+    'claude-sonnet-4-6': 'Claude', 'claude-sonnet-4-5': 'Claude',
+  }
+  return sorted.slice(0, 2).map(([m]) => names[m] || m.split('-')[0]).join(' · ')
+})
 
 // Health
 const healthDisplay = computed(() => {
@@ -553,6 +580,23 @@ onUnmounted(() => {
   border-color: var(--accent);
   box-shadow: 0 4px 16px var(--accent-glow);
   transform: translateY(-2px);
+}
+
+.stat-clickable {
+  cursor: pointer;
+}
+
+.stat-clickable:hover {
+  border-color: #f59e0b !important;
+  box-shadow: 0 4px 16px rgba(245,158,11,0.2) !important;
+}
+
+.stat-subtitle {
+  display: block;
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-top: 1px;
+  opacity: 0.8;
 }
 
 .stat-card :deep(.el-card__body) {

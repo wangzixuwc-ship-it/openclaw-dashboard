@@ -39,7 +39,7 @@ const openclawVersion = process.env.VITE_OPENCLAW_VERSION || 'unknown'
 // ============================================
 
 /**
- * 解析 .jsonl 文件，累加 token 用量
+ * 解析 .jsonl 文件，累加 token 用量（含按模型分组）
  */
 async function parseJsonlFile(filePath) {
   try {
@@ -48,6 +48,7 @@ async function parseJsonlFile(filePath) {
 
     let totalTokens = 0
     let totalCost = 0
+    const byModel = {}  // model -> { tokens, cost }
 
     for (const line of lines) {
       try {
@@ -55,13 +56,17 @@ async function parseJsonlFile(filePath) {
 
         if (entry.message?.usage) {
           const usage = entry.message.usage
-          if (usage.totalTokens) {
-            totalTokens += usage.totalTokens
-          } else if (usage.input || usage.output) {
-            totalTokens += (usage.input || 0) + (usage.output || 0)
-          }
-          if (usage.cost?.total) {
-            totalCost += usage.cost.total
+          const model = (entry.message.model || 'unknown').trim()
+          const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) || 0
+          const cost = usage.cost?.total || 0
+
+          totalTokens += tokens
+          totalCost += cost
+
+          if (tokens > 0) {
+            if (!byModel[model]) byModel[model] = { tokens: 0, cost: 0 }
+            byModel[model].tokens += tokens
+            byModel[model].cost += cost
           }
         }
 
@@ -74,10 +79,10 @@ async function parseJsonlFile(filePath) {
       }
     }
 
-    return { totalTokens, totalCost }
+    return { totalTokens, totalCost, byModel }
   } catch (e) {
     console.error(`Error reading ${filePath}:`, e.message)
-    return { totalTokens: 0, totalCost: 0 }
+    return { totalTokens: 0, totalCost: 0, byModel: {} }
   }
 }
 
@@ -93,6 +98,8 @@ async function collectUsageStats() {
   let totalTokens = 0
   let totalCost = 0
   const byAgent = {}
+  const byModel = {}        // 全局按模型汇总
+  const byAgentByModel = {} // agent -> model -> { tokens, cost }
 
   try {
     const agents = await fs.readdir(AGENTS_DIR)
@@ -123,6 +130,18 @@ async function collectUsageStats() {
           const result = await parseJsonlFile(filePath)
           agentTokens += result.totalTokens
           agentCost += result.totalCost
+
+          // 聚合按模型数据
+          for (const [model, data] of Object.entries(result.byModel)) {
+            if (!byModel[model]) byModel[model] = { tokens: 0, cost: 0 }
+            byModel[model].tokens += data.tokens
+            byModel[model].cost += data.cost
+
+            if (!byAgentByModel[agent]) byAgentByModel[agent] = {}
+            if (!byAgentByModel[agent][model]) byAgentByModel[agent][model] = { tokens: 0, cost: 0 }
+            byAgentByModel[agent][model].tokens += data.tokens
+            byAgentByModel[agent][model].cost += data.cost
+          }
         }
 
         if (agentTokens > 0 || agentCost > 0) {
@@ -144,6 +163,8 @@ async function collectUsageStats() {
       totalTokens,
       totalCost,
       byAgent,
+      byModel,
+      byAgentByModel,
       updatedAt: new Date().toISOString(),
       version: openclawVersion
     }
@@ -680,6 +701,60 @@ const server = http.createServer(async (req, res) => {
       console.error('[agents-configured] 读取失败:', e.message)
       res.writeHead(500, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
+  // ============================================
+  // Agent Running Status API（基于 session 文件修改时间检测运行状态）
+  // ============================================
+
+  if (pathname === '/api/agent-running-status' && req.method === 'GET') {
+    try {
+      const RUNNING_THRESHOLD_MS = 90 * 1000  // 90秒内有写入 = 正在运行
+      const now = Date.now()
+      // agent 目录名即 agent id（main=叶溪, pm, developer, tester, inspector, archivist）
+      const agentIds = ['main', 'pm', 'developer', 'tester', 'inspector', 'archivist']
+      const results = []
+
+      for (const id of agentIds) {
+        const sessionsDir = path.join(AGENTS_DIR, id, 'sessions')
+        let latestMtime = 0
+
+        try {
+          const files = fsSync.readdirSync(sessionsDir)
+          // 只看主会话文件（排除 trajectory、reset 备份、tmp 临时文件）
+          const sessionFiles = files.filter(f =>
+            f.endsWith('.jsonl') &&
+            !f.includes('.trajectory') &&
+            !f.includes('.reset') &&
+            !f.includes('.bak') &&
+            !f.includes('.tmp') &&
+            f !== 'sessions.json'
+          )
+          for (const file of sessionFiles) {
+            const stat = fsSync.statSync(path.join(sessionsDir, file))
+            if (stat.mtimeMs > latestMtime) latestMtime = stat.mtimeMs
+          }
+        } catch (e) {
+          // 目录不存在或无权限，忽略
+        }
+
+        const msAgo = latestMtime > 0 ? now - latestMtime : Infinity
+        results.push({
+          id,
+          status: msAgo < RUNNING_THRESHOLD_MS ? 'running' : 'idle',
+          lastModifiedMs: latestMtime,
+          msAgo: latestMtime > 0 ? Math.round(msAgo) : null
+        })
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ agents: results, checkedAt: now }))
+    } catch (e) {
+      console.error('[agent-running-status] Error:', e.message)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message, agents: [] }))
     }
     return
   }

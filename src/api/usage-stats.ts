@@ -13,6 +13,11 @@ const usageStatsApi = axios.create({
   },
 })
 
+export interface ModelUsage {
+  tokens: number
+  cost: number
+}
+
 export interface UsageStatsResponse {
   totalTokens: number
   totalCost: number
@@ -21,6 +26,8 @@ export interface UsageStatsResponse {
     cost: number
     sessionCount: number
   }>
+  byModel?: Record<string, ModelUsage>
+  byAgentByModel?: Record<string, Record<string, ModelUsage>>
   updatedAt: string
   version?: string
   error?: string
