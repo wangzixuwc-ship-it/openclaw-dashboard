@@ -25,11 +25,10 @@
             <el-card class="detail-section msg-section" shadow="never">
               <template #header>
                 <div class="section-header">
-                  <el-icon><ChatDotRound /></el-icon>
-                  消息
-                  <span class="msg-count" v-if="filteredMessages.length > 0">
-                    （{{ filteredMessages.length }} 条）
-                  </span>
+                  <div class="section-header-left">
+                    <el-icon><ChatDotRound /></el-icon>
+                    消息<span v-if="filteredMessages.length > 0" class="msg-count-inline">（{{ filteredMessages.length }} 条）</span>
+                  </div>
                   <div class="message-filters">
                     <el-checkbox v-model="showThinking" size="small">显示思考信息</el-checkbox>
                     <el-checkbox v-model="showTool" size="small">显示工具信息</el-checkbox>
@@ -1021,10 +1020,16 @@ watch(recentMessages, () => {
 .section-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
   font-weight: 600;
   font-size: 14px;
   color: var(--text-primary);
+}
+
+.section-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .msg-count {
@@ -1034,10 +1039,16 @@ watch(recentMessages, () => {
   font-weight: normal;
 }
 
+.msg-count-inline {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 4px;
+  font-weight: 400;
+}
+
 .message-filters {
   display: flex;
-  gap: 8px;
-  margin-left: 8px;
+  gap: 12px;
 }
 
 .info-grid {
