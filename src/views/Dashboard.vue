@@ -57,6 +57,16 @@
               class="refresh-btn"
             />
           </el-tooltip>
+          <!-- OpenClaw WebUI Link -->
+          <el-tooltip content="OpenClaw WebUI" placement="bottom">
+            <el-button
+              :icon="Link"
+              circle
+              size="small"
+              @click="openWebUI"
+              class="refresh-btn"
+            />
+          </el-tooltip>
         </div>
       </div>
     </header>
@@ -313,7 +323,8 @@ import {
   Money,
   ArrowRight,
   QuestionFilled,
-  Briefcase
+  Briefcase,
+  Link
 } from '@element-plus/icons-vue'
 import { el } from 'element-plus/es/locale/index.mjs'
 
@@ -415,6 +426,11 @@ function checkLoadingHint(): void {
     }
     loadingHintVisible.value = false
   }
+}
+
+/** 打开 OpenClaw WebUI */
+function openWebUI(): void {
+  window.open('http://localhost:18789', '_blank');
 }
 
 // Stats cards
@@ -707,6 +723,10 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.refresh-btn + .refresh-btn {
+  margin-left: 0px;
+}
+
 .loading-hint-alert {
   position: fixed;
   top: 70px;
@@ -871,6 +891,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-evenly;
   gap: 0;
+  width: 100%;
+  overflow: auto;
+  padding: 8px 0;
 }
 
 .workflow-step-simple-item {
@@ -916,7 +939,7 @@ onUnmounted(() => {
 }
 
 .workflow-step-simple-item.is-active .simple-step-process {
-  background: var(--el-color-success);
+  background: transparent;
   border-color: var(--el-color-success);
   color: #fff;
   box-shadow: 0 0 8px var(--accent-glow);

@@ -99,10 +99,19 @@
           <el-card class="detail-section" shadow="never">
             <template #header>
               <div class="section-header">
-                <el-icon>
-                  <InfoFilled />
-                </el-icon>
-                会话信息
+                <div class="section-header-left">
+                  <el-icon>
+                    <InfoFilled />
+                  </el-icon>
+                  会话信息
+                </div>
+                <el-tooltip content="在 WebUI 中打开此会话" placement="bottom">
+                  <el-button
+                    :icon="Link"
+                    link
+                    @click="openSessionInWebUI"
+                  />
+                </el-tooltip>
               </div>
             </template>
 
@@ -228,6 +237,7 @@ import {
   Avatar,
   Timer,
   Promotion,
+  Link,
 } from '@element-plus/icons-vue'
 
 interface MessageItem {
@@ -282,6 +292,13 @@ const filteredMessages = computed(() => {
     return true
   })
 })
+
+// REC-041: 在 WebUI 中打开当前会话
+function openSessionInWebUI(): void {
+  if (!agent.value?.key) return
+  const sessionKey = encodeURIComponent(agent.value.key || '')
+  window.open(`http://localhost:18789/session/chat?session=${sessionKey}`, '_blank')
+}
 
 // 粘贴的图片附件
 interface ImageAttachment {
@@ -1021,6 +1038,7 @@ watch(recentMessages, () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   font-weight: 600;
   font-size: 14px;
   color: var(--text-primary);
@@ -1049,6 +1067,7 @@ watch(recentMessages, () => {
 .message-filters {
   display: flex;
   gap: 12px;
+  margin-left: auto;
 }
 
 .info-grid {
