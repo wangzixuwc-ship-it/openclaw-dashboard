@@ -98,7 +98,7 @@
               {{ workflowData.taskSummary }}
             </span>
             <el-tag v-if="workflowData.mode" size="small" :type="getModeTagType(workflowData.mode)" effect="plain" class="workflow-mode-tag">
-              {{ workflowData.mode }}模式
+              {{ workflowData.mode }}
             </el-tag>
           </div>
           <div>
@@ -867,7 +867,7 @@ onUnmounted(() => {
 .workflow-steps-simple {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-evenly;
   gap: 0;
 }
 
