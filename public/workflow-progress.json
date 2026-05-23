@@ -1,10 +1,13 @@
 {
-  "activeStep": -1,
-  "steps": [
-    { "title": "任务接收" },
-    { "title": "上下文加载" },
-    { "title": "任务执行" },
-    { "title": "工具调用" },
-    { "title": "结果生成" }
-  ]
+    "projectName": "OpenClaw Dashboard",
+    "taskSummary": "REC-035: 步进条步骤改为居中显示",
+    "mode": "极速",
+    "activeStep": -1,
+    "steps": [
+        { "title": "副总" },
+        { "title": "执行秘书" },
+        { "title": "前端" },
+        { "title": "执行秘书" },
+        { "title": "副总" }
+    ]
 }

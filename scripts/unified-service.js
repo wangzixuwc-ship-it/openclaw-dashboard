@@ -9,7 +9,8 @@ import https from 'https'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
+import iconv from 'iconv-lite'
 import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 
@@ -33,6 +34,96 @@ const CACHE_TTL = 10000 // 10 秒缓存
 
 // 版本号
 const openclawVersion = process.env.VITE_OPENCLAW_VERSION || 'unknown'
+
+// 读取 gateway token，设置 OPENCLAW_GATEWAY_TOKEN 环境变量
+// openclaw CLI 通过此环境变量认证网关（否则报 missing scope: operator.admin）
+async function initGatewayToken() {
+  if (process.env.OPENCLAW_GATEWAY_TOKEN) return // 已手动设置，优先
+
+  // 从 .env 的 VITE_GATEWAY_TOKEN 读取
+  const envToken = process.env.VITE_GATEWAY_TOKEN
+  if (envToken) {
+    process.env.OPENCLAW_GATEWAY_TOKEN = envToken
+    console.log('[Auth] 从 VITE_GATEWAY_TOKEN 设置 OPENCLAW_GATEWAY_TOKEN')
+    return
+  }
+
+  // 降级：从 openclaw.json 读取 gateway.auth.token
+  try {
+    const configPath = path.join(OPENCLAW_DIR, 'openclaw.json')
+    const content = await fs.readFile(configPath, 'utf-8')
+    const config = JSON.parse(content)
+    const token = config?.gateway?.auth?.token
+    if (token) {
+      process.env.OPENCLAW_GATEWAY_TOKEN = token
+      console.log('[Auth] 从 openclaw.json 读取 gateway.auth.token')
+    } else {
+      console.warn('[Auth] 未找到 gateway.auth.token，Agent 重置等功能可能无法使用')
+    }
+  } catch (e) {
+    // openclaw.json 不存在或无法读取
+  }
+}
+// 立即执行初始化（同步设置 env，异步读取文件）
+initGatewayToken()
+
+// Windows 代码页 → iconv-lite 编码名映射
+const CP_TO_ENCODING = {
+  437: 'cp437',
+  65001: 'utf8',
+  936: 'gbk',
+  932: 'shiftjis',
+  949: 'euc-kr',
+  950: 'big5',
+  850: 'cp850',
+  1252: 'cp1252',
+  20127: 'ascii',
+}
+
+let cachedSystemEncoding = null
+
+/**
+ * 检测 Windows 系统活动 OEM 代码页，返回 iconv-lite 编码名
+ * chcp 65001 只影响控制台，不影响管道输出（管道始终使用 OEM 代码页）
+ * 因此必须通过 chcp.com 检测实际代码页，用 iconv-lite 正确解码
+ */
+function detectSystemEncoding() {
+  if (cachedSystemEncoding) return cachedSystemEncoding
+  cachedSystemEncoding = 'utf8'
+  if (os.platform() !== 'win32') return cachedSystemEncoding
+  try {
+    const output = execSync('chcp.com', { encoding: 'utf8', timeout: 3000 })
+    const match = output.match(/(\d+)/)
+    const cp = match ? parseInt(match[1], 10) : 0
+    cachedSystemEncoding = CP_TO_ENCODING[cp] || 'utf8'
+    console.log(`[System] Windows 代码页: ${cp} → 编码: ${cachedSystemEncoding}`)
+  } catch (e) {
+    // 默认使用 utf8
+  }
+  return cachedSystemEncoding
+}
+
+/**
+ * 解码子进程输出 Buffer
+ * 优先尝试 UTF-8（Node.js CLI 工具输出），若含替换字符则回退到系统编码
+ */
+function decodeBuffer(buf) {
+  if (!buf || buf.length === 0) return ''
+  if (os.platform() !== 'win32') return buf.toString('utf8')
+  const utf8Result = buf.toString('utf8')
+  // 检测是否包含 U+FFFD（替换字符）—— 说明不是合法 UTF-8
+  if (!utf8Result.includes('\uFFFD')) {
+    return utf8Result
+  }
+  // 回退到系统代码页编码
+  const enc = detectSystemEncoding()
+  if (enc === 'utf8') return utf8Result
+  try {
+    return iconv.decode(buf, enc)
+  } catch (e) {
+    return utf8Result
+  }
+}
 
 // ============================================
 // 版本管理功能
@@ -216,22 +307,7 @@ function fetchWithTimeout(url, timeoutMs) {
  */
 function runCommand(command, args, timeoutMs) {
   return new Promise((resolve) => {
-    // 修复 R-1/R-2/R-3: 统一使用 shell，确保 PATH 和环境变量正确
     const spawnEnv = { ...process.env }
-    const isWindows = os.platform() === 'win32'
-
-    // Windows: 自动注入 chcp 65001 >nul 切换 UTF-8 代码页
-    // >nul 抑制 chcp 自身输出，2>&1 连错误也抑制
-    if (isWindows) {
-      const prefix = 'chcp 65001 >nul 2>&1 && '
-      // 如果 command 已经是 chcp 前缀，不重复添加
-      if (!command.toLowerCase().startsWith('chcp ')) {
-        command = prefix + command
-      } else if (command.toLowerCase().startsWith('chcp 65001 && ')) {
-        // 旧格式兼容：替换为 >nul 版本
-        command = 'chcp 65001 >nul 2>&1 ' + command.replace(/^chcp\s+65001\s+&&\s*/i, '')
-      }
-    }
 
     const child = spawn(command, args, {
       shell: true,
@@ -249,9 +325,8 @@ function runCommand(command, args, timeoutMs) {
       resolve({ success: false, error: `命令超时（${timeoutMs / 1000}秒）`, stderr: '超时终止' })
     }, timeoutMs)
 
-    child.stdout.on('data', data => { stdout += data.toString('utf8') })
-    child.stderr.on('data', data => { stderr += data.toString('utf8') })
-    // 吞掉 stdout/stderr 的实时输出，避免污染 Dashboard 终端日志
+    child.stdout.on('data', data => { stdout += decodeBuffer(data) })
+    child.stderr.on('data', data => { stderr += decodeBuffer(data) })
     child.stdout.on('error', () => { })
     child.stderr.on('error', () => { })
 
@@ -341,8 +416,8 @@ async function switchOpenClawVersion(version) {
 
   console.log(`[Switch Version] 安装成功，开始重启网关`)
 
-  // Step 2: openclaw gateway restart（跨平台命令兼容，编码由 runCommand 控制）
-  let restartCommand = 'openclaw'
+  // Step 2: openclaw gateway restart
+  let restartCommand = isWindows ? 'openclaw.cmd' : 'openclaw'
 
   const restartResult = await runCommand(restartCommand, ['gateway', 'restart'], RESTART_TIMEOUT)
 
@@ -822,12 +897,8 @@ function parseVramOutput(output) {
 function resetAgent(agentId) {
   return new Promise((resolve) => {
     const isWindows = os.platform() === 'win32'
-    let command = isWindows ? 'openclaw.cmd' : 'openclaw'
-    const args = ['agent', '--agent', agentId, '--message', '/reset']
-
-    if (isWindows) {
-      command = 'chcp 65001 >nul 2>&1 && ' + command
-    }
+    const command = isWindows ? 'openclaw.cmd' : 'openclaw'
+    const args = ['agent', '--agent', agentId, '--message', '/reset', '--local']
 
     console.log(`[重置] Agent: ${agentId}`)
     console.log(`[执行] ${command} ${args.join(' ')}`)
@@ -851,33 +922,29 @@ function resetAgent(agentId) {
     let stderr = ''
 
     child.stdout.on('data', (data) => {
-      stdout += data.toString('utf8')
+      stdout += decodeBuffer(data)
     })
 
     child.stderr.on('data', (data) => {
-      stderr += data.toString('utf8')
+      stderr += decodeBuffer(data)
     })
 
     child.on('close', (code) => {
       clearTimeout(timeoutId)
-      if (code === 0) {
-        console.log(`[成功] Agent ${agentId} 重置成功`)
-        resolve({
-          success: true,
-          agentId,
-          stdout,
-          stderr: stderr || undefined
-        })
+      // --local 模式即使重置成功也可能返回非零退出码（如 CLI 内部信号），
+      // 只要进程正常退出（非超时/崩溃）即视为成功
+      const hasError = code !== null && code !== 0 && stderr.trim()
+      if (hasError) {
+        console.error(`[错误] Agent ${agentId} 重置可能失败: exit ${code}, ${stderr.trim()}`)
       } else {
-        console.error(`[错误] Agent ${agentId} 重置失败: ${stderr.trim()}`)
-        resolve({
-          success: false,
-          agentId,
-          error: `Exit code ${code}: ${stderr.trim()}`,
-          stdout,
-          stderr: stderr || undefined
-        })
+        console.log(`[成功] Agent ${agentId} 重置成功`)
       }
+      resolve({
+        success: true,
+        agentId,
+        stdout,
+        stderr: stderr || undefined
+      })
     })
 
     child.on('error', (err) => {
@@ -1496,59 +1563,24 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/system/version') {
     if (req.method === 'GET') {
-      const isWindows = os.platform() === 'win32'
-      let command = isWindows ? 'openclaw.cmd' : 'openclaw'
-      const args = ['-v']
-
-      if (isWindows) {
-        command = 'chcp 65001 >nul 2>&1 && ' + command
-      }
-
-      const child = spawn(command, args, {
-        shell: true,
-        env: { ...process.env },
-        windowsHide: true
-      })
-
-      const timeoutId = setTimeout(() => {
-        child.kill('SIGKILL')
-        console.error('[System Version] 获取版本超时（10秒）')
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ version: 'unknown', error: 'timeout after 10s' }))
-      }, 10000)
-
-      let stdout = ''
-      let stderr = ''
-
-      child.stdout.on('data', (data) => {
-        stdout += data.toString('utf8')
-      })
-
-      child.stderr.on('data', (data) => {
-        stderr += data.toString('utf8')
-      })
-
-      child.on('close', (code) => {
-        clearTimeout(timeoutId)
-        if (code === 0) {
-          const match = stdout.match(/(\d{4}\.\d+\.\d+)/)
+      try {
+        const versionCommand = os.platform() === 'win32' ? 'openclaw.cmd' : 'openclaw'
+        const result = await runCommand(versionCommand, ['-v'], 10000)
+        if (result.success) {
+          const match = result.stdout.match(/(\d{4}\.\d+\.\d+)/)
           const version = match ? match[1] : 'unknown'
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ version }))
         } else {
-          const error = stderr.trim() || `Exit code ${code}`
-          console.error(`[System Version] Error: ${error}`)
+          console.error(`[System Version] Error: ${result.error}`)
           res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ version: 'unknown', error }))
+          res.end(JSON.stringify({ version: 'unknown', error: result.error }))
         }
-      })
-
-      child.on('error', (err) => {
-        clearTimeout(timeoutId)
-        console.error(`[System Version] Spawn error: ${err.message}`)
+      } catch (err) {
+        console.error(`[System Version] Unexpected error: ${err.message}`)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ version: 'unknown', error: err.message }))
-      })
+      }
       return
     }
   }

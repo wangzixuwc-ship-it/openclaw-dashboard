@@ -143,6 +143,35 @@ export async function searchClawHubSkills(query: string): Promise<SearchSkillsRe
 }
 
 /**
+ * 获取项目任务进度 (REC-027)
+ * 后端接口: GET /api/tasks/current → 端口 31002
+ * 返回: { taskId, projectName, taskName, progress, currentStage, totalStages, agents, startedAt, runningMinutes }
+ */
+export interface TaskProgress {
+  taskId: string | null
+  projectName: string | null
+  taskName: string | null
+  progress: number
+  currentStage: string | null
+  totalStages: number
+  agents: string[]
+  startedAt: string | null
+  runningMinutes: number
+}
+
+export async function getTaskProgress(): Promise<TaskProgress | null> {
+  try {
+    const url = import.meta.env.DEV
+      ? '/api/tasks/current'
+      : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31002'}/api/tasks/current`
+    const resp = await axios.get(url, { timeout: 10000 })
+    return resp.data as TaskProgress
+  } catch {
+    return null
+  }
+}
+
+/**
  * 切换技能启用/禁用状态 (REC-022)
  * 后端接口: POST /api/system/skills/toggle → 端口 31002
  * 请求体: { name: string, enabled: boolean }

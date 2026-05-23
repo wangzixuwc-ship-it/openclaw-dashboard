@@ -105,7 +105,7 @@
 
             <div class="info-grid">
               <div class="info-item">
-                <span class="info-label">当前任务</span>
+                <span class="info-label">当前会话</span>
                 <span class="info-value monospace" :title="agent.label || agent.key">{{ agent.label || agent.key
                   }}</span>
               </div>

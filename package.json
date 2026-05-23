@@ -18,6 +18,7 @@
     "dompurify": "^3.4.3",
     "element-plus": "^2.13.7",
     "highlight.js": "^11.11.1",
+    "iconv-lite": "^0.7.2",
     "marked": "^18.0.3",
     "marked-highlight": "^2.2.4",
     "pinia": "^3.0.4",

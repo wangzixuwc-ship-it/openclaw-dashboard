@@ -65,7 +65,7 @@
         <div class="card-body">
           <div class="meta-grid">
             <div class="meta-item">
-              <span class="meta-label">当前任务</span>
+              <span class="meta-label">当前会话</span>
               <span class="meta-value key-value" :title="agent.label || agent.key">{{ truncateLabel }}</span>
             </div>
 
@@ -149,7 +149,7 @@
     <div class="card-body">
       <div class="meta-grid">
         <div class="meta-item">
-          <span class="meta-label">当前任务</span>
+          <span class="meta-label">当前会话</span>
           <span class="meta-value key-value" :title="agent.label || agent.key">{{ truncateLabel }}</span>
         </div>
 

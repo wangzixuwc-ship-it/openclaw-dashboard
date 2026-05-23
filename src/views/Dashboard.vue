@@ -88,30 +88,49 @@
         </div>
       </section>
 
-    <!-- ========= 3. 工作流进度步进条 / 分割线 ========= -->
+    <!-- ========= 3. 工作流进度步进条 / 空状态 ========= -->
     <div class="workflow-section">
-      <div v-if="workflowData.activeStep >= 0 && workflowData.steps.length > 0" class="workflow-steps-wrapper">
-        <el-card shadow="hover" class="workflow-card">
-          <div class="workflow-steps-simple">
-            <template v-for="(step, idx) in workflowData.steps" :key="idx">
-              <div class="workflow-step-simple-item" :class="{ 'is-active': idx === workflowData.activeStep }">
-                <span class="simple-step-circle" :class="getSimpleStepClass(idx)"></span>
-                <span class="simple-step-title">{{ step.title }}</span>
-              </div>
-              <div
-                v-if="idx < workflowData.steps.length - 1"
-                class="step-arrow-group"
-                :class="getArrowState(idx)"
-              >
-                <el-icon class="step-arrow-chevron" :style="{ animationDelay: '0ms' }"><ArrowRight /></el-icon>
-                <el-icon class="step-arrow-chevron" :style="{ animationDelay: '200ms' }"><ArrowRight /></el-icon>
-                <el-icon class="step-arrow-chevron" :style="{ animationDelay: '400ms' }"><ArrowRight /></el-icon>
-              </div>
-            </template>
+      <el-card shadow="hover" class="workflow-card">
+        <div class="workflow-card-header">
+          <span class="workflow-project-name">OpenClaw Dashboard</span>
+          <div class="workflow-header-right" v-if="workflowData.activeStep >= 0">
+            <span v-if="workflowData.taskSummary" class="workflow-task-summary-inline">
+              {{ workflowData.taskSummary }}
+            </span>
+            <el-tag v-if="workflowData.mode" size="small" :type="getModeTagType(workflowData.mode)" effect="plain" class="workflow-mode-tag">
+              {{ workflowData.mode }}模式
+            </el-tag>
           </div>
-        </el-card>
-      </div>
-      <div v-else class="workflow-divider-line" />
+          <div>
+            <span class="workflow-step-label">
+              第 {{ workflowData.activeStep + 1 }} / {{ workflowData.steps.length }} 步
+            </span>
+          </div>
+        </div>
+
+        <div v-if="workflowData.activeStep >= 0 && workflowData.steps.length > 0" class="workflow-steps-simple">
+          <template v-for="(step, idx) in workflowData.steps" :key="idx">
+            <div class="workflow-step-simple-item" :class="{ 'is-active': idx === workflowData.activeStep }">
+              <span class="simple-step-circle" :class="getSimpleStepClass(idx)"></span>
+              <span class="simple-step-title">{{ step.title }}</span>
+            </div>
+            <div
+              v-if="idx < workflowData.steps.length - 1"
+              class="step-arrow-group"
+              :class="getArrowState(idx)"
+            >
+              <el-icon class="step-arrow-chevron" :style="{ animationDelay: '0ms' }"><ArrowRight /></el-icon>
+              <el-icon class="step-arrow-chevron" :style="{ animationDelay: '200ms' }"><ArrowRight /></el-icon>
+              <el-icon class="step-arrow-chevron" :style="{ animationDelay: '400ms' }"><ArrowRight /></el-icon>
+            </div>
+          </template>
+        </div>
+
+        <div v-else class="workflow-empty-state">
+          <el-icon :size="28" class="workflow-empty-icon"><VideoPause /></el-icon>
+          <span class="workflow-empty-text">当前无任务执行</span>
+        </div>
+      </el-card>
     </div>
 
     <!-- ========= 4. 看板主体（5列：空闲/运行中/已终止/错误/未知） ========= -->
@@ -315,7 +334,7 @@ function updateClock(): void {
   currentTime.value = `${Y}年${M}月${D}日 ${h}:${m}`
 }
 
-// Workflow steps data (REC-117: 从文件轮询获取)
+// Workflow steps data (REC-031: 从 workflow-progress.json 轮询)
 const workflowData = ref<WorkflowData>({ activeStep: -1, steps: [] })
 let workflowTimer: ReturnType<typeof setInterval> | null = null
 
@@ -327,8 +346,19 @@ async function fetchWorkflowData(): Promise<void> {
       workflowData.value = data
     }
   } catch {
-    // 文件不存在或解析失败，保持当前值
+    // 保持当前值
   }
+}
+
+/** 运行模式标签颜色映射 */
+function getModeTagType(mode: string): string {
+  const map: Record<string, string> = {
+    '极速': 'danger',
+    '简化': 'warning',
+    '正常': 'primary',
+    '最优': 'success',
+  }
+  return map[mode] || 'info'
 }
 
 /** 根据步骤索引返回圆点状态 class (Element Plus Simple 风格) */
@@ -502,7 +532,7 @@ onMounted(() => {
   // Start real-time clock
   updateClock()
   clockTimer = setInterval(updateClock, 60 * 1000) // update every minute
-  // REC-117: 工作流进度持久化 — 每 5 秒轮询
+  // REC-031: 工作流进度 — 每 5 秒轮询 JSON
   fetchWorkflowData()
   workflowTimer = setInterval(fetchWorkflowData, 5000)
   // REC-011: 加载超时提示 — 每 1 秒检查
@@ -515,6 +545,7 @@ onUnmounted(() => {
     clearInterval(clockTimer)
     clockTimer = null
   }
+  // REC-031: 清理工作流轮询定时器
   if (workflowTimer) {
     clearInterval(workflowTimer)
     workflowTimer = null
@@ -790,17 +821,37 @@ onUnmounted(() => {
 .workflow-section {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 8px 24px;
 }
 
-.workflow-steps-wrapper {
-  padding: 8px 0;
-}
+/* REC-029: workflow-steps-wrapper 已移除，padding 合并到 workflow-section */
 
 .workflow-card {
   border: 1px solid var(--border-color);
   border-radius: 10px;
   transition: all 0.3s;
+}
+
+.workflow-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
+.workflow-project-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.workflow-step-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  background: var(--bg-card-hover);
+  border-radius: 4px;
 }
 
 .workflow-card:hover {
@@ -816,6 +867,7 @@ onUnmounted(() => {
 .workflow-steps-simple {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0;
 }
 
@@ -824,12 +876,12 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  flex: 1;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: 80px;
 }
 
 .workflow-step-simple-item.is-active .simple-step-title {
-  color: var(--accent);
+  color: var(--el-color-success);
   font-weight: 600;
 }
 
@@ -861,6 +913,13 @@ onUnmounted(() => {
   box-shadow: 0 0 8px var(--accent-glow);
 }
 
+.workflow-step-simple-item.is-active .simple-step-process {
+  background: var(--el-color-success);
+  border-color: var(--el-color-success);
+  color: #fff;
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
 .simple-step-waiting {
   background: transparent;
   border-color: var(--text-secondary);
@@ -879,9 +938,12 @@ onUnmounted(() => {
   transition: color 0.3s;
 }
 
-.workflow-step-simple-item.is-active .simple-step-title,
 .simple-step-finished + .simple-step-title {
   color: var(--accent);
+}
+
+.workflow-step-simple-item.is-active .simple-step-title{
+  color: var(--el-color-success);
 }
 
 /* ==================== 箭头分隔符 ==================== */
@@ -933,6 +995,40 @@ onUnmounted(() => {
   height: 1px;
   background: var(--border-color);
   border-radius: 1px;
+}
+
+/* REC-033: header 右侧布局 */
+.workflow-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workflow-task-summary-inline {
+  font-size: 12px;
+  color: var(--text-primary);
+  opacity: 0.8;
+  font-weight: 500;
+}
+
+.workflow-mode-tag {
+  font-size: 11px;
+}
+
+/* REC-028: 空状态提示 */
+.workflow-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 0 18px 0;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.workflow-empty-icon {
+  color: #9ca3af;
+  opacity: 0.6;
 }
 
 /* ==================== BOARD LAYOUT ==================== */

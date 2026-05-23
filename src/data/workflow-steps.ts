@@ -26,6 +26,12 @@ export interface WorkflowData {
   activeStep: number
   /** 流程步骤列表 */
   steps: WorkflowStep[]
+  /** 项目名称（可选） */
+  projectName?: string
+  /** 任务概要（可选） */
+  taskSummary?: string
+  /** 运行模式（可选）：极速/简化/正常/最优 */
+  mode?: string
 }
 
 /** 空工作流状态 — 表示没有流程进度，Dashboard 将显示原始横线分割线 */
@@ -38,13 +44,14 @@ export const emptyWorkflow: WorkflowData = {
  * 默认的流程步骤定义
  * 描述一个 Agent 任务的完整生命周期
  */
-const defaultSteps: WorkflowStep[] = [
+export const WORKFLOW_STEPS: WorkflowStep[] = [
   { title: '任务接收', description: '接收并解析任务指令' },
   { title: '上下文加载', description: '加载会话历史和系统提示' },
   { title: '任务执行', description: 'Agent 正在执行任务' },
   { title: '工具调用', description: '调用外部工具获取信息' },
   { title: '结果生成', description: '生成最终回复' },
 ]
+const defaultSteps = WORKFLOW_STEPS
 
 /**
  * 默认工作流数据
