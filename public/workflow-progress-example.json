@@ -1,7 +1,13 @@
 {
-  "projectName": "",
-  "taskSummary": "",
-  "mode": "",
+  "projectName": "OpenClaw Dashboard",
+  "taskSummary": "REC-036: AgentDetailDrawer 添加消息类型过滤复选框",
+  "mode": "极速",
   "activeStep": -1,
-  "steps": []
+  "steps": [
+    { "title": "副总" },
+    { "title": "执行秘书" },
+    { "title": "前端" },
+    { "title": "执行秘书" },
+    { "title": "副总" }
+  ]
 }
