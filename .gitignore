@@ -34,3 +34,4 @@ start-init.bat
 start-init.sh
 data/*
 data/projects.json
+public/workflow-progress.json

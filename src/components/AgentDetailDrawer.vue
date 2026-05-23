@@ -27,19 +27,23 @@
                 <div class="section-header">
                   <el-icon><ChatDotRound /></el-icon>
                   消息
-                  <span class="msg-count" v-if="recentMessages.length > 0">
-                    （{{ recentMessages.length }} 条）
+                  <span class="msg-count" v-if="filteredMessages.length > 0">
+                    （{{ filteredMessages.length }} 条）
                   </span>
+                  <div class="message-filters">
+                    <el-checkbox v-model="showThinking" size="small">显示思考信息</el-checkbox>
+                    <el-checkbox v-model="showTool" size="small">显示工具信息</el-checkbox>
+                  </div>
                 </div>
               </template>
 
               <div ref="msgContainerRef" class="msg-scroll-wrap">
-                <el-empty v-if="recentMessages.length === 0" class="msg-card-inner empty-area" description="暂无消息" :image-size="60" />
+                <el-empty v-if="filteredMessages.length === 0" class="msg-card-inner empty-area" description="暂无消息" :image-size="60" />
 
                 <div v-else class="msg-card-inner">
                   <div class="messages-list-outer" @click="handleMsgImageClick">
                     <div
-                      v-for="(msg, idx) in recentMessages"
+                      v-for="(msg, idx) in filteredMessages"
                       :key="idx"
                       class="chat-row"
                       :class="msg.role === 'user' ? 'chat-row-user' : 'chat-row-assistant'"
@@ -267,6 +271,18 @@ const resetting = ref(false)
 const chatInput = ref('')
 const sending = ref(false)
 const msgContainerRef = ref<HTMLElement | null>(null)
+
+// REC-036: 消息类型过滤
+const showThinking = ref(true)
+const showTool = ref(false)
+
+const filteredMessages = computed(() => {
+  return recentMessages.value.filter(msg => {
+    if (msg.contentType === 'thinking') return showThinking.value
+    if (msg.contentType === 'toolUse' || msg.contentType === 'toolResult') return showTool.value
+    return true
+  })
+})
 
 // 粘贴的图片附件
 interface ImageAttachment {
@@ -1016,6 +1032,12 @@ watch(recentMessages, () => {
   font-size: 12px;
   color: var(--text-secondary);
   font-weight: normal;
+}
+
+.message-filters {
+  display: flex;
+  gap: 8px;
+  margin-left: 8px;
 }
 
 .info-grid {

@@ -89,10 +89,10 @@
       </section>
 
     <!-- ========= 3. 工作流进度步进条 / 空状态 ========= -->
-    <div class="workflow-section">
+    <div class="workflow-section" v-if="workflowData.projectName">
       <el-card shadow="hover" class="workflow-card">
         <div class="workflow-card-header">
-          <span class="workflow-project-name">OpenClaw Dashboard</span>
+          <span class="workflow-project-name">{{ workflowData.projectName }}</span>
           <div class="workflow-header-right" v-if="workflowData.activeStep >= 0">
             <span v-if="workflowData.taskSummary" class="workflow-task-summary-inline">
               {{ workflowData.taskSummary }}
@@ -132,6 +132,8 @@
         </div>
       </el-card>
     </div>
+
+    <el-divider v-if="!workflowData.projectName" style="margin:0;"></el-divider> 
 
     <!-- ========= 4. 看板主体（5列：空闲/运行中/已终止/错误/未知） ========= -->
     <main class="board-container">
@@ -881,7 +883,7 @@ onUnmounted(() => {
 }
 
 .workflow-step-simple-item.is-active .simple-step-title {
-  color: var(--el-color-success);
+  color: var(--el-color-primary);
   font-weight: 600;
 }
 
