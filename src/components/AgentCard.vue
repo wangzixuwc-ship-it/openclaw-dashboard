@@ -84,25 +84,68 @@
             </div>
           </div>
 
-          <!-- Token Usage Progress Bar -->
-          <div class="token-section" v-if="agent.tokenUsage">
+          <!-- Token Usage Progress Bar (all agents) -->
+          <div class="token-section">
             <div class="token-header">
               <span class="meta-label">上下文用量</span>
-              <span class="token-percent" :class="percentageClass">{{ tokenPercent }}%</span>
+              <span class="token-percent" :class="agent.tokenUsage ? percentageClass : 'text-muted'">
+                {{ agent.tokenUsage ? tokenPercent + '%' : '—' }}
+              </span>
             </div>
             <el-progress
-              :percentage="agent.tokenUsage.percentage"
-              :status="tokenProgressStatus"
+              :percentage="agent.tokenUsage?.percentage ?? 0"
+              :status="agent.tokenUsage ? tokenProgressStatus : undefined"
               :stroke-width="6"
               :show-text="false"
-              class="token-progress"
+              :class="['token-progress', !agent.tokenUsage ? 'token-progress--empty' : '']"
             />
             <div class="token-detail">
-              <span>{{ agent.tokenUsage.current.toLocaleString() }}</span>
+              <span>{{ agent.tokenUsage ? agent.tokenUsage.current.toLocaleString() : '—' }}</span>
               <span class="token-sep">/</span>
-              <span>{{ agent.tokenUsage.max.toLocaleString() }}</span>
+              <span>{{ agent.tokenUsage ? agent.tokenUsage.max.toLocaleString() : '—' }}</span>
             </div>
           </div>
+
+          <!-- ▼ 实时活动条 -->
+          <el-popover
+            v-if="agent.status === 'running'"
+            placement="bottom"
+            :width="360"
+            trigger="hover"
+            :show-after="200"
+            :hide-after="100"
+            popper-class="live-activity-popper"
+          >
+            <template #default>
+              <div class="live-steps-popup">
+                <div class="live-steps-title">近期活动</div>
+                <template v-if="liveSteps.length > 0">
+                  <div
+                    v-for="(step, i) in liveSteps"
+                    :key="i"
+                    class="live-step-row"
+                    :class="`step-type-${step.type}`"
+                  >
+                    <span class="step-icon-sm">{{ stepIcon(step.type) }}</span>
+                    <div class="step-content">
+                      <span class="step-type-badge">{{ stepTypeLabel(step.type) }}</span>
+                      <span class="step-full-text">{{ stepPopupText(step) }}</span>
+                    </div>
+                  </div>
+                </template>
+                <div v-else class="live-steps-empty">加载中…</div>
+              </div>
+            </template>
+            <template #reference>
+              <div class="live-activity-strip" @click.stop>
+                <span class="live-pulse-dot" />
+                <div class="live-activity-content">
+                  <span class="live-step-type">{{ bestInlineStep ? stepTypeLabel(bestInlineStep.type) : '运行中' }}</span>
+                  <span class="live-activity-text">{{ stepInlineText(bestInlineStep) }}</span>
+                </div>
+              </div>
+            </template>
+          </el-popover>
         </div>
       </el-card>
     </template>
@@ -169,31 +212,71 @@
         </div>
       </div>
 
-      <!-- Token Usage Progress Bar (当前 session) -->
-      <div class="token-section" v-if="agent.tokenUsage">
+      <!-- Token Usage Progress Bar (all agents) -->
+      <div class="token-section">
         <div class="token-header">
           <span class="meta-label">上下文用量</span>
-          <span class="token-percent" :class="percentageClass">{{ tokenPercent }}%</span>
+          <span class="token-percent" :class="agent.tokenUsage ? percentageClass : 'text-muted'">
+            {{ agent.tokenUsage ? tokenPercent + '%' : '—' }}
+          </span>
         </div>
         <el-progress
-          :percentage="agent.tokenUsage.percentage"
-          :status="tokenProgressStatus"
+          :percentage="agent.tokenUsage?.percentage ?? 0"
+          :status="agent.tokenUsage ? tokenProgressStatus : undefined"
           :stroke-width="6"
           :show-text="false"
-          class="token-progress"
+          :class="['token-progress', !agent.tokenUsage ? 'token-progress--empty' : '']"
         />
         <div class="token-detail">
-          <span>{{ agent.tokenUsage.current.toLocaleString() }}</span>
+          <span>{{ agent.tokenUsage ? agent.tokenUsage.current.toLocaleString() : '—' }}</span>
           <span class="token-sep">/</span>
-          <span>{{ agent.tokenUsage.max.toLocaleString() }}</span>
+          <span>{{ agent.tokenUsage ? agent.tokenUsage.max.toLocaleString() : '—' }}</span>
         </div>
       </div>
+
+      <!-- ▼ 实时活动条 -->
+      <el-popover
+        v-if="agent.status === 'running'"
+        placement="bottom"
+        :width="360"
+        trigger="hover"
+        :show-after="200"
+        :hide-after="100"
+        popper-class="live-activity-popper"
+      >
+        <template #default>
+          <div class="live-steps-popup">
+            <div class="live-steps-title">近期活动</div>
+            <template v-if="liveSteps.length > 0">
+              <div
+                v-for="(step, i) in liveSteps"
+                :key="i"
+                class="live-step-row"
+                :class="`step-type-${step.type}`"
+              >
+                <span class="step-icon-sm">{{ stepIcon(step.type) }}</span>
+                <span class="step-full-text">{{ stepShortText(step) }}</span>
+              </div>
+            </template>
+            <div v-else class="live-steps-empty">加载中…</div>
+          </div>
+        </template>
+        <template #reference>
+          <div class="live-activity-strip" @click.stop>
+            <span class="live-pulse-dot" />
+            <span class="live-activity-text">
+              <span v-if="latestStep">{{ stepIcon(latestStep.type) }} {{ stepShortText(latestStep).slice(0, 64) }}</span>
+              <span v-else>正在运行…</span>
+            </span>
+          </div>
+        </template>
+      </el-popover>
     </div>
   </el-card>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { AgentInfo } from '../stores/agent'
@@ -416,6 +499,102 @@ const avatarIcon = computed(() => {
   if (isSpecialAgent.value) return Avatar
   return UserFilled
 })
+
+// ========== 实时活动（running 时轮询 session jsonl） ==========
+interface LiveStep {
+  type: 'trigger' | 'thinking' | 'tool' | 'toolResult' | 'text'
+  name?: string
+  text: string
+  timestamp: string | null
+}
+
+const liveSteps = ref<LiveStep[]>([])
+let liveActivityTimer: ReturnType<typeof setInterval> | null = null
+
+async function fetchLiveActivity() {
+  if (props.agent.status !== 'running') return
+  try {
+    const resp = await fetch(`/api/agent-live-activity?agent=${agentId.value}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      liveSteps.value = data.steps || []
+    }
+  } catch { /* 网络失败静默 */ }
+}
+
+watch(() => props.agent.status, (newStatus) => {
+  if (newStatus === 'running') {
+    fetchLiveActivity()
+    if (!liveActivityTimer) {
+      liveActivityTimer = setInterval(fetchLiveActivity, 2500)
+    }
+  } else {
+    if (liveActivityTimer) { clearInterval(liveActivityTimer); liveActivityTimer = null }
+  }
+}, { immediate: true })
+
+onUnmounted(() => {
+  if (liveActivityTimer) { clearInterval(liveActivityTimer); liveActivityTimer = null }
+})
+
+const latestStep = computed(() => liveSteps.value[liveSteps.value.length - 1] ?? null)
+
+// 内嵌条优先显示有意义的步骤（跳过英文 thinking）
+const bestInlineStep = computed(() => {
+  const steps = liveSteps.value
+  // 优先找：text > toolResult > tool > trigger
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const t = steps[i].type
+    if (t === 'text' || t === 'toolResult' || t === 'tool') return steps[i]
+  }
+  // 都是 thinking/trigger 就直接用最后一步
+  return latestStep.value
+})
+
+function stepIcon(type: string): string {
+  const map: Record<string, string> = {
+    thinking: '💭', tool: '🔧', toolResult: '⚡', text: '✉️', trigger: '🎯',
+  }
+  return map[type] ?? '•'
+}
+
+function stepTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    thinking: '思考中', tool: '调用工具', toolResult: '工具结果', text: '回复', trigger: '触发任务',
+  }
+  return map[type] ?? type
+}
+
+// 内嵌条文本：不显示英文 thinking，提取有意义的中文内容
+function stepInlineText(step: LiveStep | null): string {
+  if (!step) return '正在运行…'
+  if (step.type === 'thinking') return '思考中…'
+  if (step.type === 'trigger') {
+    // 提取 cron 消息主体，去掉 [cron:xxx name] 前缀
+    const m = step.text.match(/\]\s*(.+)/)
+    return (m ? m[1] : step.text).slice(0, 60)
+  }
+  if (step.type === 'tool') {
+    return `${step.name ?? 'exec'}${step.text ? ': ' + step.text.slice(0, 50) : ''}`
+  }
+  if (step.type === 'toolResult') {
+    // 取第一行有内容的输出
+    const firstLine = step.text.split('\n').find(l => l.trim()) ?? ''
+    return firstLine.slice(0, 60) || '执行完成'
+  }
+  // text 类型：如果是 NO_REPLY 就说"无需回复"
+  const t = step.text.trim()
+  if (t === 'NO_REPLY' || t === '\n\nNO_REPLY') return '无需回复'
+  return t.slice(0, 60)
+}
+
+// 悬停气泡文本：thinking 不显示英文内容
+function stepPopupText(step: LiveStep): string {
+  if (step.type === 'thinking') return '（思考中，内容略）'
+  return stepInlineText(step)
+}
+
+// =========================================================
 
 function openDrawer(): void {
   emit('detail', props.agent)
@@ -679,6 +858,120 @@ function openDrawer(): void {
 .text-warning { color: #ffc107; font-weight: 600; }
 .text-danger { color: #f44336; font-weight: 600; }
 .text-info { color: #9e9e9e; font-weight: 600; }
+.text-muted { color: var(--text-secondary); font-weight: 400; }
+.token-progress--empty :deep(.el-progress-bar__inner) { background: rgba(255,255,255,0.06); }
+
+/* ==================== 实时活动条 ==================== */
+.live-activity-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(76, 175, 80, 0.07);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  cursor: default;
+  overflow: hidden;
+}
+
+.live-pulse-dot {
+  flex-shrink: 0;
+  margin-top: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4caf50;
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+.live-activity-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.live-step-type {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #81c784;
+  line-height: 1;
+}
+
+.live-activity-text {
+  font-size: 11.5px;
+  color: rgba(210, 240, 210, 0.88);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+/* ── 悬停气泡内容 ── */
+.live-steps-popup {
+  padding: 2px 0;
+}
+.live-steps-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.live-step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.live-step-row:last-child { border-bottom: none; }
+.step-icon-sm { flex-shrink: 0; font-size: 14px; line-height: 1.5; }
+.step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.step-type-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: rgba(255,255,255,0.4);
+  text-transform: uppercase;
+}
+.step-full-text {
+  font-size: 12px;
+  color: rgba(220,220,220,0.9);
+  line-height: 1.45;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.step-type-thinking .step-type-badge { color: #ffe082; }
+.step-type-thinking .step-full-text  { color: rgba(255,224,130,0.7); font-style: italic; }
+.step-type-tool .step-type-badge     { color: #90caf9; }
+.step-type-tool .step-full-text      { color: #bbdefb; }
+.step-type-toolResult .step-type-badge { color: #a5d6a7; }
+.step-type-toolResult .step-full-text  { color: #c8e6c9; }
+.step-type-text .step-type-badge     { color: #ce93d8; }
+.step-type-text .step-full-text      { color: #e1bee7; }
+.step-type-trigger .step-full-text   { color: rgba(200,200,200,0.55); font-size: 11px; }
+.live-steps-empty {
+  font-size: 12px;
+  color: rgba(255,255,255,0.3);
+  padding: 4px 0;
+}
 
 </style>
 
@@ -687,6 +980,18 @@ function openDrawer(): void {
      scoped 样式无法穿透，必须放在非 scoped 块中
      ════════════════════════════════════════════════ -->
 <style>
+/* ==================== 实时活动悬停弹窗 ==================== */
+.el-popover.live-activity-popper {
+  z-index: 5001 !important;
+  background: linear-gradient(135deg, rgba(18, 28, 18, 0.97), rgba(12, 22, 12, 0.99)) !important;
+  border: 1px solid rgba(76, 175, 80, 0.3) !important;
+  border-radius: 10px !important;
+  box-shadow:
+    0 4px 16px rgba(76, 175, 80, 0.15),
+    0 2px 8px rgba(0, 0, 0, 0.5) !important;
+  padding: 12px 14px !important;
+}
+
 /* ==================== REC-071: 气泡弹出框 ==================== */
 .el-popover.bubble-popover {
   z-index: 5000 !important;

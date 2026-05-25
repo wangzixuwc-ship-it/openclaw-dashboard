@@ -1573,6 +1573,94 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // GET /api/agent-live-activity?agent=id — 读取 agent 正在做什么（session jsonl 末尾）
+  // ============================================
+  if (pathname === '/api/agent-live-activity' && req.method === 'GET') {
+    const agentId = url.searchParams.get('agent') || 'main'
+    try {
+      const sessionsDir = path.join(AGENTS_DIR, agentId, 'sessions')
+      // 找最近修改的 session .jsonl 文件
+      let latestFile = null
+      let latestMtime = 0
+      try {
+        const files = fsSync.readdirSync(sessionsDir)
+        for (const f of files) {
+          if (!f.endsWith('.jsonl') || f.includes('.trajectory') || f.includes('.reset') || f.includes('.bak') || f.includes('.tmp') || f === 'sessions.json') continue
+          const fpath = path.join(sessionsDir, f)
+          const stat = fsSync.statSync(fpath)
+          if (stat.mtimeMs > latestMtime) { latestMtime = stat.mtimeMs; latestFile = fpath }
+        }
+      } catch (e) { /* sessions dir missing */ }
+
+      if (!latestFile) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ agentId, steps: [], msAgo: null }))
+        return
+      }
+
+      // 读最后 12KB，避免读超大文件
+      const READ_TAIL = 12 * 1024
+      const stat = fsSync.statSync(latestFile)
+      const fileSize = stat.size
+      const readStart = Math.max(0, fileSize - READ_TAIL)
+      const buf = Buffer.alloc(Math.min(READ_TAIL, fileSize))
+      const fd = fsSync.openSync(latestFile, 'r')
+      fsSync.readSync(fd, buf, 0, buf.length, readStart)
+      fsSync.closeSync(fd)
+
+      // 按行解析，跳过第一行（可能截断），取完整 JSON 行
+      const rawLines = buf.toString('utf-8').split('\n')
+      const lines = readStart > 0 ? rawLines.slice(1) : rawLines  // 截断偏移时丢掉首行残片
+
+      const steps = []
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        let obj
+        try { obj = JSON.parse(trimmed) } catch { continue }
+        if (obj.type !== 'message' || !obj.message) continue
+        const msg = obj.message
+        const ts = obj.timestamp || null
+
+        if (msg.role === 'user') {
+          // 触发消息
+          const textPart = Array.isArray(msg.content) ? msg.content.find(c => c.type === 'text') : null
+          const text = textPart?.text || ''
+          steps.push({ type: 'trigger', text: text.slice(0, 120), timestamp: ts })
+        } else if (msg.role === 'assistant') {
+          for (const part of (Array.isArray(msg.content) ? msg.content : [])) {
+            if (part.type === 'thinking') {
+              steps.push({ type: 'thinking', text: (part.thinking || '').slice(0, 120), timestamp: ts })
+            } else if (part.type === 'toolCall') {
+              const inputStr = part.input ? JSON.stringify(part.input).slice(0, 100) : ''
+              steps.push({ type: 'tool', name: part.name || '', text: inputStr, timestamp: ts })
+            } else if (part.type === 'text') {
+              const t = (part.text || '').trim()
+              if (t && t !== 'NO_REPLY') steps.push({ type: 'text', text: t.slice(0, 120), timestamp: ts })
+            }
+          }
+        } else if (msg.role === 'toolResult') {
+          const textPart = Array.isArray(msg.content) ? msg.content.find(c => c.type === 'text') : null
+          const text = (textPart?.text || '').trim().slice(0, 120)
+          if (text) steps.push({ type: 'toolResult', name: msg.toolName || '', text, timestamp: ts })
+        }
+      }
+
+      // 只返回最后 8 步
+      const recentSteps = steps.slice(-8)
+      const msAgo = latestMtime > 0 ? Date.now() - latestMtime : null
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ agentId, steps: recentSteps, msAgo, fileSize }))
+    } catch (e) {
+      console.error('[agent-live-activity] Error:', e.message)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ agentId, steps: [], msAgo: null, error: e.message }))
+    }
+    return
+  }
+
+  // ============================================
   // GET /api/agent-crons — 获取所有 Agent 的定时任务
   // ============================================
   if (pathname === '/api/agent-crons' && req.method === 'GET') {
@@ -2499,6 +2587,7 @@ server.listen(PORT, () => {
   console.log('  POST /api/system/sync-versions  - 同步版本列表')
   console.log('  POST /api/system/switch-version - 切换版本')
   console.log('  GET  /api/tasks/current           - 获取当前任务进度')
+  console.log('  GET  /api/agent-live-activity     - 读取 agent 当前正在做什么')
   console.log('  GET  /api/system/skills           - 获取技能列表')
   console.log('  POST /api/system/skills/install   - 安装技能')
   console.log('  POST /api/system/skills/toggle    - 启用/禁用技能')

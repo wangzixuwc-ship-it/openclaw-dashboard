@@ -37,9 +37,11 @@
                       :class="['skills-shortcut-btn', showSkillsPanel ? 'skills-shortcut-btn--active' : '']"
                       @click="showSkillsPanel = !showSkillsPanel; showCronPanel = false"
                     >
-                      <el-icon><Collection /></el-icon>
-                      技能库
-                      <span class="shortcut-count">{{ drawerSkillsEnriched.length }}</span>
+                      <el-icon class="shortcut-icon"><Collection /></el-icon>
+                      <span class="shortcut-bottom">
+                        <span class="shortcut-label">技能库</span>
+                        <span class="shortcut-count">{{ drawerSkillsEnriched.length }}</span>
+                      </span>
                     </button>
                     <!-- 定时任务快捷入口 -->
                     <button
@@ -47,9 +49,11 @@
                       :class="['skills-shortcut-btn', showCronPanel ? 'skills-shortcut-btn--active' : '']"
                       @click="showCronPanel = !showCronPanel; showSkillsPanel = false"
                     >
-                      <el-icon><Timer /></el-icon>
-                      定时任务
-                      <span class="shortcut-count">{{ agentCrons.length }}</span>
+                      <el-icon class="shortcut-icon"><Timer /></el-icon>
+                      <span class="shortcut-bottom">
+                        <span class="shortcut-label">定时任务</span>
+                        <span class="shortcut-count">{{ agentCrons.length }}</span>
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -190,6 +194,42 @@
 
         <!-- ========= 右侧：会话信息 + 上下文使用 + 操作 ========= -->
         <div class="drawer-right">
+
+          <!-- 实时活动（运行中时显示） -->
+          <el-card v-if="agent.status === 'running'" class="detail-section live-activity-card" shadow="never">
+            <template #header>
+              <div class="section-header">
+                <div class="section-header-left">
+                  <span class="live-header-dot" />
+                  正在做什么
+                </div>
+                <span class="live-header-time" v-if="drawerLiveSteps.length > 0">
+                  实时更新
+                </span>
+              </div>
+            </template>
+            <div class="drawer-live-steps">
+              <div v-if="drawerLiveLoading && drawerLiveSteps.length === 0" class="drawer-live-empty">
+                <el-icon class="is-loading"><Loading /></el-icon> 加载中…
+              </div>
+              <div v-else-if="drawerLiveSteps.length === 0" class="drawer-live-empty">暂无活动数据</div>
+              <div v-else>
+                <div
+                  v-for="(step, i) in drawerLiveSteps"
+                  :key="i"
+                  class="drawer-live-row"
+                  :class="`dlr-${step.type}`"
+                >
+                  <div class="dlr-left">
+                    <span class="dlr-icon">{{ drawerStepIcon(step.type) }}</span>
+                    <span class="dlr-badge">{{ drawerStepLabel(step.type) }}</span>
+                  </div>
+                  <div class="dlr-text">{{ drawerStepText(step) }}</div>
+                </div>
+              </div>
+            </div>
+          </el-card>
+
           <!-- Session Info -->
           <el-card class="detail-section" shadow="never">
             <template #header>
@@ -236,7 +276,7 @@
           </el-card>
 
           <!-- Token / 上下文使用 -->
-          <el-card class="detail-section" shadow="never" v-if="agent.tokenUsage">
+          <el-card class="detail-section" shadow="never">
             <template #header>
               <div class="section-header">
                 <el-icon>
@@ -247,25 +287,44 @@
             </template>
 
             <div class="token-usage-panel">
-              <div class="token-stat-row">
-                <div class="token-stat">
-                  <div class="stat-value">{{ agent.tokenUsage.current.toLocaleString() }}</div>
-                  <div class="stat-label">Used Tokens</div>
-                </div>
-                <div class="token-stat">
-                  <div class="stat-value">{{ agent.tokenUsage.max.toLocaleString() }}</div>
-                  <div class="stat-label">上下文上限</div>
-                </div>
-                <div class="token-stat">
-                  <div class="stat-value" :class="percentageClass">
-                    {{ agent.tokenUsage.percentage }}%
+              <template v-if="agent.tokenUsage">
+                <div class="token-stat-row">
+                  <div class="token-stat">
+                    <div class="stat-value">{{ agent.tokenUsage.current.toLocaleString() }}</div>
+                    <div class="stat-label">Used Tokens</div>
                   </div>
-                  <div class="stat-label">使用率</div>
+                  <div class="token-stat">
+                    <div class="stat-value">{{ agent.tokenUsage.max.toLocaleString() }}</div>
+                    <div class="stat-label">上下文上限</div>
+                  </div>
+                  <div class="token-stat">
+                    <div class="stat-value" :class="percentageClass">
+                      {{ agent.tokenUsage.percentage }}%
+                    </div>
+                    <div class="stat-label">使用率</div>
+                  </div>
                 </div>
-              </div>
-
-              <el-progress :percentage="agent.tokenUsage.percentage" :status="tokenProgressStatus" :stroke-width="12"
-                :show-text="false" class="token-progress" />
+                <el-progress :percentage="agent.tokenUsage.percentage" :status="tokenProgressStatus" :stroke-width="12"
+                  :show-text="false" class="token-progress" />
+              </template>
+              <template v-else>
+                <div class="token-stat-row">
+                  <div class="token-stat">
+                    <div class="stat-value">—</div>
+                    <div class="stat-label">Used Tokens</div>
+                  </div>
+                  <div class="token-stat">
+                    <div class="stat-value">—</div>
+                    <div class="stat-label">上下文上限</div>
+                  </div>
+                  <div class="token-stat">
+                    <div class="stat-value">—%</div>
+                    <div class="stat-label">使用率</div>
+                  </div>
+                </div>
+                <el-progress :percentage="0" :stroke-width="12" :show-text="false" class="token-progress token-progress--inactive" />
+                <div class="token-no-data">飞书会话暂无上下文统计</div>
+              </template>
             </div>
           </el-card>
 
@@ -336,7 +395,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
@@ -536,6 +595,79 @@ const drawerAgentId = computed(() => {
 })
 
 const agentHistoricalTokens = computed(() => store.getAgentHistoricalTokens(drawerAgentId.value))
+
+// ════════════════════════════════════════════════
+// 实时活动（抽屉内右侧面板）
+// ════════════════════════════════════════════════
+interface DrawerLiveStep {
+  type: 'trigger' | 'thinking' | 'tool' | 'toolResult' | 'text'
+  name?: string
+  text: string
+  timestamp: string | null
+}
+
+const drawerLiveSteps = ref<DrawerLiveStep[]>([])
+const drawerLiveLoading = ref(false)
+let drawerLiveTimer: ReturnType<typeof setInterval> | null = null
+
+async function fetchDrawerLiveActivity() {
+  if (agent.value?.status !== 'running') return
+  try {
+    const resp = await fetch(`/api/agent-live-activity?agent=${drawerAgentId.value}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      drawerLiveSteps.value = data.steps || []
+    }
+  } catch { /* 静默 */ }
+  drawerLiveLoading.value = false
+}
+
+function startDrawerLivePoll() {
+  drawerLiveLoading.value = true
+  fetchDrawerLiveActivity()
+  if (!drawerLiveTimer) drawerLiveTimer = setInterval(fetchDrawerLiveActivity, 2500)
+}
+function stopDrawerLivePoll() {
+  if (drawerLiveTimer) { clearInterval(drawerLiveTimer); drawerLiveTimer = null }
+  drawerLiveSteps.value = []
+}
+
+watch(() => agent.value?.status, (s) => {
+  if (s === 'running') startDrawerLivePoll()
+  else stopDrawerLivePoll()
+}, { immediate: true })
+
+// 切换 agent 时重置
+watch(() => agent.value?.key, () => {
+  stopDrawerLivePoll()
+  if (agent.value?.status === 'running') startDrawerLivePoll()
+})
+
+onUnmounted(() => stopDrawerLivePoll())
+
+function drawerStepIcon(type: string): string {
+  const m: Record<string, string> = { thinking: '💭', tool: '🔧', toolResult: '⚡', text: '✉️', trigger: '🎯' }
+  return m[type] ?? '•'
+}
+function drawerStepLabel(type: string): string {
+  const m: Record<string, string> = { thinking: '正在思考', tool: '调用工具', toolResult: '工具结果', text: '回复', trigger: '触发任务' }
+  return m[type] ?? type
+}
+function drawerStepText(step: DrawerLiveStep): string {
+  if (step.type === 'thinking') return '思考中，内容略…'
+  if (step.type === 'trigger') {
+    const m = step.text.match(/\]\s*(.+)/)
+    return (m ? m[1] : step.text).slice(0, 160)
+  }
+  if (step.type === 'tool') return `${step.name ?? 'exec'}${step.text ? ': ' + step.text.slice(0, 120) : ''}`
+  if (step.type === 'toolResult') {
+    const lines = step.text.split('\n').filter(l => l.trim())
+    return lines.slice(0, 4).join('\n').slice(0, 200) || '执行完成'
+  }
+  const t = step.text.trim()
+  if (t === 'NO_REPLY' || t.endsWith('NO_REPLY')) return '无需回复（任务静默完成）'
+  return t.slice(0, 200)
+}
 
 const agentModelBreakdown = computed(() => {
   const byModel = store.globalUsage.byAgentByModel?.[drawerAgentId.value]
@@ -1402,7 +1534,8 @@ watch(recentMessages, () => {
 
 .message-filters {
   display: flex;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
   margin-left: auto;
 }
 
@@ -1476,6 +1609,16 @@ watch(recentMessages, () => {
 
 .token-progress {
   margin-top: 8px;
+}
+.token-progress--inactive :deep(.el-progress-bar__inner) {
+  background: rgba(255,255,255,0.08);
+}
+.token-no-data {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+  opacity: 0.6;
 }
 
 /* 聊天气泡样式（由 .messages-list-outer 承载） */
@@ -1818,6 +1961,84 @@ watch(recentMessages, () => {
   line-height: 20px;
   border-radius: 50%;
 }
+
+/* ════════ 实时活动卡片 ════════ */
+.live-activity-card {
+  border-color: rgba(76, 175, 80, 0.25) !important;
+  background: rgba(76, 175, 80, 0.04) !important;
+}
+
+.live-header-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4caf50;
+  margin-right: 6px;
+  animation: drawerPulse 1.4s ease-in-out infinite;
+}
+@keyframes drawerPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.7); }
+}
+.live-header-time {
+  font-size: 10px;
+  color: #81c784;
+  font-weight: 400;
+  margin-left: auto;
+}
+.drawer-live-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.drawer-live-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.drawer-live-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.drawer-live-row:last-child { border-bottom: none; }
+.dlr-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dlr-icon { font-size: 13px; line-height: 1; }
+.dlr-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: rgba(255,255,255,0.38);
+}
+.dlr-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(230,230,230,0.88);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-left: 20px;
+}
+/* 分类颜色 */
+.dlr-thinking .dlr-badge  { color: #ffe082; }
+.dlr-thinking .dlr-text   { color: rgba(255,224,130,0.65); font-style: italic; }
+.dlr-tool .dlr-badge      { color: #90caf9; }
+.dlr-tool .dlr-text       { color: #bbdefb; }
+.dlr-toolResult .dlr-badge { color: #a5d6a7; }
+.dlr-toolResult .dlr-text  { color: #c8e6c9; font-family: 'Cascadia Code', monospace; font-size: 11.5px; }
+.dlr-text .dlr-badge      { color: #ce93d8; }
+.dlr-text .dlr-text       { color: #e1bee7; }
+.dlr-trigger .dlr-text    { color: rgba(200,200,200,0.6); font-size: 11.5px; }
 </style>
 
 <!-- 非 scoped：v-html 渲染的 markdown 内容不受 scoped 限制 -->
@@ -2062,18 +2283,20 @@ watch(recentMessages, () => {
 /* ══ 技能库快捷按钮（消息区 header 右侧） ══ */
 .skills-shortcut-btn {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 3px 9px;
-  border-radius: 12px;
+  padding: 7px 14px;
+  border-radius: 10px;
   border: 1px solid var(--border-color);
   background: rgba(255,255,255,0.04);
   color: var(--text-secondary);
-  font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
-  line-height: 1;
   white-space: nowrap;
+  min-width: 64px;
+  line-height: 1;
 }
 .skills-shortcut-btn:hover {
   border-color: var(--accent, #42a5f5);
@@ -2085,13 +2308,24 @@ watch(recentMessages, () => {
   color: var(--accent, #42a5f5);
   background: rgba(66,165,245,0.12);
 }
+.shortcut-icon {
+  font-size: 18px !important;
+}
+.shortcut-bottom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.shortcut-label {
+  font-size: 11px;
+}
 .shortcut-count {
   font-size: 10px;
   background: rgba(255,255,255,0.1);
   border-radius: 8px;
   padding: 0 5px;
-  height: 15px;
-  line-height: 15px;
+  height: 14px;
+  line-height: 14px;
 }
 
 /* ══ 内联技能面板（消息列表上方） ══ */

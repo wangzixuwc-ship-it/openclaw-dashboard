@@ -47,26 +47,16 @@
             </div>
           </el-tooltip>
 
-           <!-- Skills Button (REC-005: 替换"刷新"按钮) -->
-          <el-tooltip content="技能库" placement="bottom">
-            <el-button
-              :icon="Briefcase"
-              circle
-              size="small"
-              @click="skillsDialogVisible = true"
-              class="refresh-btn"
-            />
-          </el-tooltip>
+          <!-- Skills Button -->
+          <div class="indicator indicator-action" @click="skillsDialogVisible = true">
+            <el-icon :size="14"><Briefcase /></el-icon>
+            <span class="indicator-label">技能库</span>
+          </div>
           <!-- OpenClaw WebUI Link -->
-          <el-tooltip content="OpenClaw WebUI" placement="bottom">
-            <el-button
-              :icon="Link"
-              circle
-              size="small"
-              @click="openWebUI"
-              class="refresh-btn"
-            />
-          </el-tooltip>
+          <div class="indicator indicator-action" @click="openWebUI">
+            <el-icon :size="14"><Link /></el-icon>
+            <span class="indicator-label">WebUI</span>
+          </div>
         </div>
       </div>
     </header>
@@ -739,12 +729,18 @@ onUnmounted(() => {
   font-family: 'Cascadia Code', 'Fira Code', monospace;
 }
 
-.refresh-btn {
-  flex-shrink: 0;
+.indicator-action {
+  cursor: pointer;
+  user-select: none;
 }
-
-.refresh-btn + .refresh-btn {
-  margin-left: 0px;
+.indicator-action:hover {
+  border-color: var(--accent);
+  background: rgba(66, 165, 245, 0.12);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.indicator-action .indicator-label {
+  color: var(--text-primary);
+  font-weight: 500;
 }
 
 .loading-hint-alert {
