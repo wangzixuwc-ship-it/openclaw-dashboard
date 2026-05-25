@@ -62,6 +62,11 @@
           <span>按 Agent</span>
         </template>
       </el-tab-pane>
+      <el-tab-pane name="compare">
+        <template #label>
+          <span>对比</span>
+        </template>
+      </el-tab-pane>
       <el-tab-pane name="clawhub">
         <template #label>
           <span>ClawHub</span>
@@ -150,6 +155,58 @@
             </div>
           </div>
         </template>
+      </el-scrollbar>
+    </div>
+
+    <!-- ══ 对比 tab ══ -->
+    <div v-else-if="activeTab === 'compare' && skillsData" class="compare-section">
+      <div v-if="agentsConfigured.length === 0" class="compare-empty">
+        <el-empty description="暂无可对比的 Agent" :image-size="60" />
+      </div>
+      <el-scrollbar v-else class="compare-scrollbar">
+        <!-- 列标题行 -->
+        <div class="compare-header">
+          <div class="compare-skill-col">技能</div>
+          <div
+            v-for="ag in agentsConfigured"
+            :key="ag.id"
+            class="compare-agent-col"
+            :title="ag.name"
+          >{{ shortAgentName(ag.name || ag.id) }}</div>
+        </div>
+        <!-- 分组行 -->
+        <template v-for="(skills, catName) in compareSkillsByCategory" :key="catName">
+          <div class="compare-cat-row">
+            <span class="compare-cat-icon">{{ getCategoryIcon(catName) }}</span>
+            {{ catName }}
+          </div>
+          <div
+            v-for="skillName in skills"
+            :key="skillName"
+            class="compare-row"
+          >
+            <div class="compare-skill-col">
+              <span class="compare-skill-name">{{ getSkillDisplayName(skillName) }}</span>
+              <span class="compare-skill-id">{{ skillName }}</span>
+            </div>
+            <div
+              v-for="ag in agentsConfigured"
+              :key="ag.id"
+              class="compare-agent-col"
+            >
+              <span
+                :class="['compare-dot', `compare-dot--${compareStatus(skillName, ag.id)}`]"
+                :title="compareDotTitle(skillName, ag.id)"
+              />
+            </div>
+          </div>
+        </template>
+        <!-- 图例 -->
+        <div class="compare-legend">
+          <span class="compare-legend-item"><span class="compare-dot compare-dot--enabled" /> 已激活</span>
+          <span class="compare-legend-item"><span class="compare-dot compare-dot--inactive" /> 已安装未激活</span>
+          <span class="compare-legend-item"><span class="compare-dot compare-dot--absent" /> 未配置</span>
+        </div>
       </el-scrollbar>
     </div>
 
@@ -461,6 +518,7 @@ const SKILL_DESCRIPTIONS: Record<string, string> = {
   '1password': '安全访问密码管理器中的凭据和机密',
   'apple-notes': '读写系统备忘录，管理笔记内容',
   'apple-reminders': '创建和管理系统提醒事项',
+  'lark-approval-extra': '扩展版飞书审批，支持自定义表单字段、条件分支和多级审批人配置',
 }
 
 // ── 技能分类 ──────────────────────────────────────────────
@@ -581,6 +639,60 @@ const selectedAgentSkillsByCategory = computed(() => {
   }
   return result
 })
+
+// ── 对比 tab 计算属性 ─────────────────────────────────────
+
+/** 所有 agent 技能的并集（去重） */
+const allCompareSkills = computed<string[]>(() => {
+  const s = new Set<string>()
+  for (const ag of agentsConfigured.value) {
+    for (const sk of ag.skills) s.add(sk)
+  }
+  return [...s]
+})
+
+/** 按分类分组的对比技能 */
+const compareSkillsByCategory = computed<Record<string, string[]>>(() => {
+  const result: Record<string, string[]> = {}
+  const catOrder = Object.keys(SKILL_CATEGORIES).concat(['其他'])
+  for (const cat of catOrder) result[cat] = []
+  for (const sk of allCompareSkills.value) {
+    const cat = getSkillCategory(sk)
+    if (!result[cat]) result[cat] = []
+    result[cat].push(sk)
+  }
+  for (const cat of catOrder) {
+    if (result[cat].length === 0) delete result[cat]
+  }
+  return result
+})
+
+/** 对比状态：某技能在某 agent 上的状态 */
+function compareStatus(skillName: string, agentId: string): 'enabled' | 'inactive' | 'absent' {
+  const ag = agentsConfigured.value.find(a => a.id === agentId)
+  if (!ag || !ag.skills.includes(skillName)) return 'absent'
+  const info = skillsData.value?.skills.find(s => s.name === skillName)
+  if (!info?.installed) return 'inactive'
+  return info.enabled ? 'enabled' : 'inactive'
+}
+
+function compareDotTitle(skillName: string, agentId: string): string {
+  const ag = agentsConfigured.value.find(a => a.id === agentId)
+  const agName = ag ? shortAgentName(ag.name || ag.id) : agentId
+  const st = compareStatus(skillName, agentId)
+  if (st === 'enabled') return `${agName} · 已激活`
+  if (st === 'inactive') {
+    const ag2 = agentsConfigured.value.find(a => a.id === agentId)
+    const configured = ag2?.skills.includes(skillName)
+    if (configured) {
+      const info = skillsData.value?.skills.find(s => s.name === skillName)
+      if (!info?.installed) return `${agName} · 已配置但未安装`
+      return `${agName} · 已安装未激活`
+    }
+    return `${agName} · 未配置`
+  }
+  return `${agName} · 未配置`
+}
 
 // ── watch ─────────────────────────────────────────────────
 watch(() => props.visible, async (val) => {
@@ -1030,4 +1142,75 @@ function formatDate(dateStr: string): string {
 /* ── 统计信息 ── */
 .skill-stats { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color); }
 .stat-item { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+
+/* ── 对比 tab ── */
+.compare-section { display: flex; flex-direction: column; }
+.compare-empty { padding: 32px 0; }
+.compare-scrollbar { height: 65vh; }
+.compare-header {
+  display: flex; align-items: center;
+  padding: 6px 0 6px 0;
+  border-bottom: 2px solid var(--border-color);
+  position: sticky; top: 0;
+  background: var(--bg-card, #1a1d25);
+  z-index: 2;
+}
+.compare-cat-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 0 4px 2px;
+  font-size: 12px; font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.compare-cat-icon { font-size: 13px; }
+.compare-row {
+  display: flex; align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.compare-row:hover { background: rgba(255,255,255,0.03); }
+.compare-skill-col {
+  flex: 0 0 220px; min-width: 220px;
+  display: flex; flex-direction: column; gap: 1px;
+  padding-right: 8px;
+}
+.compare-skill-name {
+  font-size: 13px; color: var(--text-primary); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.compare-skill-id {
+  font-size: 10px; color: var(--text-secondary); opacity: 0.6;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.compare-header .compare-skill-col {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.compare-agent-col {
+  flex: 1; min-width: 52px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600;
+  color: var(--text-secondary);
+  text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.compare-dot {
+  display: inline-block;
+  width: 12px; height: 12px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.compare-dot--enabled { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+.compare-dot--inactive { background: #f59e0b; opacity: 0.85; }
+.compare-dot--absent { background: transparent; border: 1.5px dashed rgba(255,255,255,0.2); }
+.compare-legend {
+  display: flex; gap: 20px; align-items: center;
+  padding: 14px 4px 6px 4px;
+  border-top: 1px solid var(--border-color);
+  margin-top: 8px;
+}
+.compare-legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-secondary);
+}
 </style>

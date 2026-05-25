@@ -232,23 +232,36 @@ const agentId = computed(() => {
   return (parts[0] === 'agent' && parts.length >= 2) ? parts[1] : parts[0]
 })
 
-// 优先级：.env VITE_AGENT_{ID}_AVATAR > public/avatars/{id}.jpg
+// 优先级：VITE_AGENT_{ID}_AVATAR env > /avatars/{id}.jpg > /avatars/{id}.png > emoji
 const envAvatar = computed(() => {
   const idUpper = agentId.value.replace(/-/g, '_').toUpperCase()
   const envKey = `VITE_AGENT_${idUpper}_AVATAR`
   return (import.meta.env as Record<string, string>)[envKey] || ''
 })
 
-const avatarLoadFailed = ref(false)
+// 两步降级：先试 .jpg，失败后试 .png，再失败才展示 emoji
+const avatarJpgFailed = ref(false)
+const avatarPngFailed = ref(false)
+
+// agent 切换时重置
+watch(agentId, () => {
+  avatarJpgFailed.value = false
+  avatarPngFailed.value = false
+})
 
 const avatarSrc = computed(() => {
-  if (avatarLoadFailed.value) return ''
   if (envAvatar.value) return envAvatar.value
-  return `/avatars/${agentId.value}.jpg`
+  if (!avatarJpgFailed.value) return `/avatars/${agentId.value}.jpg`
+  if (!avatarPngFailed.value) return `/avatars/${agentId.value}.png`
+  return ''
 })
 
 function onAvatarError() {
-  avatarLoadFailed.value = true
+  if (!avatarJpgFailed.value) {
+    avatarJpgFailed.value = true   // .jpg 失败，下一次尝试 .png
+  } else {
+    avatarPngFailed.value = true   // .png 也失败，降级到 emoji
+  }
 }
 
 // ========== 历史 Token ==========

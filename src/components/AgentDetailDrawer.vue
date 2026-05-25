@@ -34,7 +34,6 @@
                     <el-checkbox v-model="showTool" size="small">显示工具信息</el-checkbox>
                     <!-- 技能库快捷入口 -->
                     <button
-                      v-if="drawerAgentSkillNames.length > 0"
                       :class="['skills-shortcut-btn', showSkillsPanel ? 'skills-shortcut-btn--active' : '']"
                       @click="showSkillsPanel = !showSkillsPanel"
                     >
@@ -52,6 +51,10 @@
                   <div v-if="drawerSkillsLoading" class="skills-panel-loading">
                     <el-icon class="is-loading"><Loading /></el-icon>
                     <span>加载中...</span>
+                  </div>
+                  <div v-else-if="drawerAgentSkillNames.length === 0" class="skills-panel-empty">
+                    <el-icon><Collection /></el-icon>
+                    <span>该 Agent 未配置专属技能（通用对话助手）</span>
                   </div>
                   <div v-else class="skills-panel-grid">
                     <div
@@ -1983,6 +1986,16 @@ watch(recentMessages, () => {
   color: var(--text-secondary);
   font-size: 12px;
   padding: 4px 0;
+}
+
+.skills-panel-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 6px 2px;
+  opacity: 0.75;
 }
 
 /* 技能条目网格：两列 */
