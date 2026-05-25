@@ -209,6 +209,75 @@
             </div>
           </el-card>
 
+          <!-- 专属技能 -->
+          <el-card class="detail-section" shadow="never" v-if="drawerAgentSkillNames.length > 0 || drawerSkillsLoading">
+            <template #header>
+              <div class="section-header">
+                <el-icon><Collection /></el-icon>
+                专属技能
+                <span class="skills-count-badge">{{ drawerAgentSkillNames.length }}</span>
+              </div>
+            </template>
+            <div v-if="drawerSkillsLoading" class="skills-loading-row">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>加载中...</span>
+            </div>
+            <div v-else class="drawer-skills-list">
+              <div
+                v-for="skill in drawerSkillsEnriched"
+                :key="skill.name"
+                class="drawer-skill-row"
+                :class="{
+                  'skill-enabled': skill.enabled,
+                  'skill-disabled': skill.installed && !skill.enabled,
+                  'skill-uninstalled': !skill.installed,
+                }"
+              >
+                <!-- 状态指示器 -->
+                <span
+                  class="skill-status-dot"
+                  :class="{
+                    'dot-enabled': skill.enabled,
+                    'dot-disabled': skill.installed && !skill.enabled,
+                    'dot-uninstalled': !skill.installed,
+                  }"
+                  :title="skill.enabled ? '已激活' : skill.installed ? '已安装，未激活' : '未安装'"
+                />
+                <!-- 技能名称 -->
+                <div class="drawer-skill-info">
+                  <span class="drawer-skill-name">{{ skill.displayName }}</span>
+                  <span class="drawer-skill-id">{{ skill.name }}</span>
+                </div>
+                <!-- 操作按钮（仅限已安装） -->
+                <el-button
+                  v-if="skill.installed && skill.enabled"
+                  size="small"
+                  type="danger"
+                  plain
+                  :loading="drawerSkillsToggling.get(skill.name)"
+                  :disabled="drawerSkillsToggling.get(skill.name)"
+                  @click="handleDrawerSkillToggle(skill.name, false)"
+                  class="skill-toggle-btn"
+                >
+                  禁用
+                </el-button>
+                <el-button
+                  v-else-if="skill.installed && !skill.enabled"
+                  size="small"
+                  type="success"
+                  plain
+                  :loading="drawerSkillsToggling.get(skill.name)"
+                  :disabled="drawerSkillsToggling.get(skill.name)"
+                  @click="handleDrawerSkillToggle(skill.name, true)"
+                  class="skill-toggle-btn"
+                >
+                  启用
+                </el-button>
+                <span v-else class="skill-uninstalled-tag">未安装</span>
+              </div>
+            </div>
+          </el-card>
+
           <!-- Extra Details -->
           <el-card class="detail-section" shadow="never" v-if="agent.details">
             <template #header>
@@ -252,11 +321,13 @@ import { useAgentStore } from '../stores/agent'
 import { ToolRestrictedError } from '../api/gateway'
 import { getAuthToken } from '../config/auth'
 import { ElMessage, ElMessageBox, ElImageViewer } from 'element-plus'
+import { getSkills, toggleSkill } from '../api/system'
 import {
   UserFilled,
   InfoFilled,
   Coin,
   Odometer,
+  Collection,
   ChatDotRound,
   Document,
   Refresh,
@@ -456,6 +527,92 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M'
   if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
   return n.toString()
+}
+
+// ── 专属技能（读取 agents-configured + skills） ──────────────────────────────
+const SKILL_DISPLAY_NAMES: Record<string, string> = {
+  'lark-im': '飞书即时通讯', 'lark-task': '飞书任务', 'lark-calendar': '飞书日历',
+  'lark-doc': '飞书文档', 'lark-wiki': '飞书知识库', 'lark-base': '飞书多维表格',
+  'lark-sheets': '飞书电子表格', 'lark-drive': '飞书云盘', 'lark-contact': '飞书通讯录',
+  'lark-mail': '飞书邮件', 'lark-approval': '飞书审批', 'lark-attendance': '飞书考勤',
+  'lark-minutes': '飞书会议纪要', 'lark-okr': '飞书 OKR', 'lark-slides': '飞书幻灯片',
+  'lark-vc': '飞书视频会议', 'lark-whiteboard': '飞书白板', 'lark-markdown': '飞书 Markdown',
+  'lark-workflow-meeting-summary': '会议总结工作流', 'lark-workflow-standup-report': '站会报告工作流',
+  'feishu-toolkit': '飞书工具包', 'feishu-doc': '飞书文档（增强）', 'feishu-wiki': '飞书知识库（增强）',
+  'feishu-drive': '飞书云盘（增强）', 'feishu-perm': '飞书权限管理', 'jw-feishu-suite': '嘉维飞书套件',
+  'diagram-maker': '流程图绘制', 'browser-automation': '浏览器自动化', 'python-debugpy': 'Python 调试',
+  'node-inspect-debugger': 'Node.js 调试', 'spike': '技术调研工具', 'weather': '天气查询',
+  'canvas': '画布工具', '1password': '密码管理器', 'apple-notes': 'Apple 备忘录',
+}
+
+interface DrawerSkill {
+  name: string
+  displayName: string
+  installed: boolean
+  enabled: boolean
+}
+
+const drawerAgentSkillNames = ref<string[]>([])
+const drawerAllSkills = ref<Map<string, { installed: boolean; enabled: boolean }>>(new Map())
+const drawerSkillsLoading = ref(false)
+const drawerSkillsToggling = ref<Map<string, boolean>>(new Map())
+
+const drawerSkillsEnriched = computed<DrawerSkill[]>(() => {
+  return drawerAgentSkillNames.value.map(name => {
+    const info = drawerAllSkills.value.get(name)
+    return {
+      name,
+      displayName: SKILL_DISPLAY_NAMES[name] || name,
+      installed: info?.installed ?? false,
+      enabled: info?.enabled ?? false,
+    }
+  })
+})
+
+async function fetchDrawerSkills(): Promise<void> {
+  const id = drawerAgentId.value
+  if (!id) return
+  drawerSkillsLoading.value = true
+  try {
+    const [configResp, skillsResp] = await Promise.all([
+      fetch('/api/agents-configured').then(r => r.ok ? r.json() : { agents: [] }).catch(() => ({ agents: [] })),
+      getSkills(),
+    ])
+    const agentCfg = (configResp.agents || []).find((a: { id: string }) => a.id === id)
+    drawerAgentSkillNames.value = Array.isArray(agentCfg?.skills) ? agentCfg.skills : []
+
+    const map = new Map<string, { installed: boolean; enabled: boolean }>()
+    for (const s of (skillsResp?.skills || [])) {
+      map.set(s.name, { installed: !!s.installed, enabled: !!s.enabled })
+    }
+    drawerAllSkills.value = map
+  } catch (e) {
+    console.error('[DrawerSkills] fetch error:', e)
+  } finally {
+    drawerSkillsLoading.value = false
+  }
+}
+
+async function handleDrawerSkillToggle(skillName: string, enabled: boolean): Promise<void> {
+  drawerSkillsToggling.value.set(skillName, true)
+  try {
+    const result = await toggleSkill(skillName, enabled)
+    if (result?.success) {
+      ElMessage.success(`"${SKILL_DISPLAY_NAMES[skillName] || skillName}" 已${enabled ? '启用' : '禁用'}`)
+      // 本地更新，无需重新全量拉取
+      const cur = drawerAllSkills.value.get(skillName)
+      drawerAllSkills.value.set(skillName, { installed: cur?.installed ?? true, enabled })
+      drawerAllSkills.value = new Map(drawerAllSkills.value) // trigger reactivity
+    } else {
+      ElMessage.error(result?.message ?? `切换 "${skillName}" 失败`)
+    }
+  } catch (e) {
+    console.error('[DrawerSkills] toggle error:', e)
+    ElMessage.error('切换技能状态失败')
+  } finally {
+    drawerSkillsToggling.value.delete(skillName)
+    drawerSkillsToggling.value = new Map(drawerSkillsToggling.value)
+  }
 }
 
 const isSpecialAgent = computed(() => {
@@ -943,6 +1100,8 @@ watch(drawerVisible, (val) => {
   if (val && agent.value) {
     // Load history on open - 首次打开强制滚动到底部
     loadHistory(false, true)
+    // 加载技能数据
+    fetchDrawerSkills()
     // 抽屉打开期间定时刷新消息
     refreshTimer = setInterval(() => {
       if (drawerVisible.value && agent.value) {
@@ -1775,5 +1934,104 @@ watch(recentMessages, () => {
   max-width: 100%;
   border-radius: 6px;
   margin: 8px 0;
+}
+
+/* ══ 专属技能 ══ */
+.skills-count-badge {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 0 6px;
+  height: 16px;
+  line-height: 16px;
+  margin-left: 4px;
+}
+
+.skills-loading-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.drawer-skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.drawer-skill-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.drawer-skill-row:hover {
+  background: rgba(255,255,255,0.05);
+}
+.skill-uninstalled {
+  opacity: 0.45;
+}
+
+/* 3 态状态点 */
+.skill-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+.dot-enabled {
+  background: #4caf50;
+  box-shadow: 0 0 5px rgba(76,175,80,0.7);
+}
+.dot-disabled {
+  background: #f59e0b;
+  box-shadow: 0 0 4px rgba(245,158,11,0.5);
+}
+.dot-uninstalled {
+  background: transparent;
+  border: 1.5px dashed rgba(255,255,255,0.3);
+}
+
+.drawer-skill-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.drawer-skill-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drawer-skill-id {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  font-family: monospace;
+}
+
+.skill-toggle-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+  height: auto;
+  line-height: 1.4;
+}
+
+.skill-uninstalled-tag {
+  font-size: 10px;
+  color: rgba(255,255,255,0.25);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 </style>

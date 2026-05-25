@@ -100,11 +100,23 @@
             <div
               v-for="skill in group"
               :key="skill.name"
-              :class="['skill-row', skill.enabled ? 'skill-row--enabled' : 'skill-row--disabled']"
+              :class="[
+                'skill-row',
+                skill.enabled ? 'skill-row--enabled'
+                  : skill.installed ? 'skill-row--inactive'
+                  : 'skill-row--uninstalled'
+              ]"
             >
               <div class="skill-row-status">
-                <span v-if="skill.enabled" class="status-dot status-dot--on" title="已激活" />
-                <span v-else class="status-dot status-dot--off" title="未激活" />
+                <span
+                  :class="[
+                    'status-dot',
+                    skill.enabled ? 'status-dot--on'
+                      : skill.installed ? 'status-dot--inactive'
+                      : 'status-dot--off'
+                  ]"
+                  :title="skill.enabled ? '已激活' : skill.installed ? '已安装，未激活' : '未安装'"
+                />
               </div>
               <div class="skill-row-info">
                 <div class="skill-row-name">
@@ -113,6 +125,28 @@
                 </div>
                 <div class="skill-row-desc">{{ getSkillDescription(skill.name) }}</div>
               </div>
+              <!-- 操作按钮（仅限已安装） -->
+              <el-button
+                v-if="skill.installed && skill.enabled"
+                size="small"
+                type="danger"
+                plain
+                :loading="togglingSkills.get(skill.name)"
+                :disabled="togglingSkills.get(skill.name)"
+                @click="handleToggle(skill.name, false)"
+                class="skill-row-btn"
+              >禁用</el-button>
+              <el-button
+                v-else-if="skill.installed && !skill.enabled"
+                size="small"
+                type="success"
+                plain
+                :loading="togglingSkills.get(skill.name)"
+                :disabled="togglingSkills.get(skill.name)"
+                @click="handleToggle(skill.name, true)"
+                class="skill-row-btn"
+              >启用</el-button>
+              <span v-else class="skill-uninstalled-label">未安装</span>
             </div>
           </div>
         </template>
@@ -899,17 +933,34 @@ function formatDate(dateStr: string): string {
   background: rgba(255,255,255,0.04);
   border-color: var(--border-color);
 }
-.skill-row--disabled { opacity: 0.55; }
+.skill-row--enabled  { /* full opacity */ }
+.skill-row--inactive  { opacity: 0.75; }
+.skill-row--uninstalled { opacity: 0.4; }
 
-.skill-row-status { padding-top: 4px; flex-shrink: 0; }
+.skill-row-status { padding-top: 5px; flex-shrink: 0; }
 .status-dot {
   display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  flex-shrink: 0;
+  transition: all 0.2s;
 }
-.status-dot--on { background: #4caf50; box-shadow: 0 0 4px rgba(76,175,80,0.6); }
-.status-dot--off { background: rgba(255,255,255,0.2); }
+/* 已激活：绿色实心 */
+.status-dot--on {
+  background: #4caf50;
+  box-shadow: 0 0 5px rgba(76,175,80,0.7);
+}
+/* 已安装但未激活：橙色实心 */
+.status-dot--inactive {
+  background: #f59e0b;
+  box-shadow: 0 0 4px rgba(245,158,11,0.5);
+}
+/* 未安装：灰色虚线圆圈 */
+.status-dot--off {
+  background: transparent;
+  border: 1.5px dashed rgba(255,255,255,0.3);
+}
 
 .skill-row-info { flex: 1; min-width: 0; }
 .skill-row-name {
@@ -923,6 +974,22 @@ function formatDate(dateStr: string): string {
 }
 .skill-row-id { font-size: 11px; color: var(--text-secondary); opacity: 0.65; font-family: monospace; font-weight: 400; }
 .skill-row-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; line-height: 1.4; }
+
+.skill-row-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+  height: auto;
+  line-height: 1.4;
+  align-self: center;
+}
+.skill-uninstalled-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: rgba(255,255,255,0.2);
+  align-self: center;
+  white-space: nowrap;
+}
 
 /* ── 弹框样式 ── */
 :deep(.skills-dialog.el-dialog) {
