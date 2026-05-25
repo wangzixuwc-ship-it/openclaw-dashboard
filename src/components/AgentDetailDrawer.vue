@@ -330,12 +330,17 @@ const filteredMessages = computed(() => {
 function openSessionInWebUI(): void {
   if (!agent.value?.key) return
   const token = getAuthToken()
-  const sessionKey = encodeURIComponent(agent.value.key || '')
-  const base = import.meta.env.VITE_GATEWAY_URL || 'http://localhost:18789'
-  const url = token
-    ? `${base}/session/chat?session=${sessionKey}&token=${encodeURIComponent(token)}`
-    : `${base}/session/chat?session=${sessionKey}`
-  window.open(url, '_blank')
+  const sessionKey = agent.value.key || ''
+  const httpBase = import.meta.env.VITE_GATEWAY_URL || 'http://localhost:18789'
+  const wsBase = httpBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
+  if (token) {
+    // 使用 hash fragment 携带 token + gatewayUrl，避免 token 出现在服务器日志
+    // session 参数须放在 query string（UI 从 searchParams 读取）
+    const hash = `token=${encodeURIComponent(token)}&gatewayUrl=${encodeURIComponent(wsBase)}`
+    window.open(`${httpBase}/session/chat?session=${encodeURIComponent(sessionKey)}#${hash}`, '_blank')
+  } else {
+    window.open(`${httpBase}/session/chat?session=${encodeURIComponent(sessionKey)}`, '_blank')
+  }
 }
 
 // 粘贴的图片附件

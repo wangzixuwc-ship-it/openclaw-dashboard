@@ -412,7 +412,10 @@ let loadingHintTimer: ReturnType<typeof setTimeout> | null = null
 let loadingCheckTimer: ReturnType<typeof setInterval> | null = null
 
 function checkLoadingHint(): void {
-  if (store.isPolling) {
+  // 只在"首次加载尚未完成"时（lastUpdateTime 仍为 0）才显示提示
+  // isPolling 表示轮询循环在运行，不代表正在加载
+  const initialLoadPending = store.isPolling && store.lastUpdateTime === 0
+  if (initialLoadPending) {
     if (!loadingHintVisible.value && !loadingHintTimer) {
       loadingHintTimer = setTimeout(() => {
         loadingHintVisible.value = true
@@ -428,12 +431,26 @@ function checkLoadingHint(): void {
   }
 }
 
-/** 打开 OpenClaw WebUI（携带 token 实现免登录） */
+/** 打开 OpenClaw WebUI（携带 token + WebSocket 地址，实现自动登录）
+ *
+ * OpenClaw Control UI 支持 URL hash 参数：
+ *   #token=<gateway_token>&gatewayUrl=<ws_url>
+ * 传入两者后 UI 会弹确认框（若 URL 与已保存的不同），
+ * 确认一次后就会记住设置，后续打开自动登录。
+ * 注意：使用 hash fragment 而非 query param，避免 token 出现在服务器日志中。
+ */
 function openWebUI(): void {
   const token = getAuthToken()
-  const base = import.meta.env.VITE_GATEWAY_URL || 'http://localhost:18789'
-  const url = token ? `${base}?token=${encodeURIComponent(token)}` : base
-  window.open(url, '_blank')
+  // 根据 VITE_GATEWAY_URL 推导 WebSocket 地址（http→ws，https→wss）
+  const httpBase = import.meta.env.VITE_GATEWAY_URL || 'http://localhost:18789'
+  const wsBase = httpBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:')
+
+  if (token) {
+    const hash = `token=${encodeURIComponent(token)}&gatewayUrl=${encodeURIComponent(wsBase)}`
+    window.open(`${httpBase}/#${hash}`, '_blank')
+  } else {
+    window.open(httpBase, '_blank')
+  }
 }
 
 // Stats cards
