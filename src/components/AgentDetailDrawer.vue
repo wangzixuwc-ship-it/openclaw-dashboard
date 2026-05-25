@@ -32,9 +32,59 @@
                   <div class="message-filters">
                     <el-checkbox v-model="showThinking" size="small">显示思考信息</el-checkbox>
                     <el-checkbox v-model="showTool" size="small">显示工具信息</el-checkbox>
+                    <!-- 技能库快捷入口 -->
+                    <button
+                      v-if="drawerAgentSkillNames.length > 0"
+                      :class="['skills-shortcut-btn', showSkillsPanel ? 'skills-shortcut-btn--active' : '']"
+                      @click="showSkillsPanel = !showSkillsPanel"
+                    >
+                      <el-icon><Collection /></el-icon>
+                      技能库
+                      <span class="shortcut-count">{{ drawerAgentSkillNames.length }}</span>
+                    </button>
                   </div>
                 </div>
               </template>
+
+              <!-- ▼ 可折叠技能面板（在消息区上方） -->
+              <transition name="skills-panel">
+                <div v-if="showSkillsPanel" class="skills-inline-panel">
+                  <div v-if="drawerSkillsLoading" class="skills-panel-loading">
+                    <el-icon class="is-loading"><Loading /></el-icon>
+                    <span>加载中...</span>
+                  </div>
+                  <div v-else class="skills-panel-grid">
+                    <div
+                      v-for="skill in drawerSkillsEnriched"
+                      :key="skill.name"
+                      :class="['sp-item', skill.enabled ? 'sp-on' : skill.installed ? 'sp-inactive' : 'sp-off']"
+                    >
+                      <span
+                        :class="['sp-dot', skill.enabled ? 'sp-dot--on' : skill.installed ? 'sp-dot--inactive' : 'sp-dot--off']"
+                        :title="skill.enabled ? '已激活' : skill.installed ? '已安装，未激活' : '未安装'"
+                      />
+                      <span class="sp-name" :title="skill.name">{{ skill.displayName }}</span>
+                      <el-button
+                        v-if="skill.installed && skill.enabled"
+                        size="small" type="danger" plain
+                        :loading="drawerSkillsToggling.get(skill.name)"
+                        :disabled="drawerSkillsToggling.get(skill.name)"
+                        @click="handleDrawerSkillToggle(skill.name, false)"
+                        class="sp-btn"
+                      >禁用</el-button>
+                      <el-button
+                        v-else-if="skill.installed && !skill.enabled"
+                        size="small" type="success" plain
+                        :loading="drawerSkillsToggling.get(skill.name)"
+                        :disabled="drawerSkillsToggling.get(skill.name)"
+                        @click="handleDrawerSkillToggle(skill.name, true)"
+                        class="sp-btn"
+                      >启用</el-button>
+                      <span v-else class="sp-uninstalled">未装</span>
+                    </div>
+                  </div>
+                </div>
+              </transition>
 
               <div ref="msgContainerRef" class="msg-scroll-wrap">
                 <el-empty v-if="filteredMessages.length === 0" class="msg-card-inner empty-area" description="暂无消息" :image-size="60" />
@@ -209,75 +259,6 @@
             </div>
           </el-card>
 
-          <!-- 专属技能 -->
-          <el-card class="detail-section" shadow="never" v-if="drawerAgentSkillNames.length > 0 || drawerSkillsLoading">
-            <template #header>
-              <div class="section-header">
-                <el-icon><Collection /></el-icon>
-                专属技能
-                <span class="skills-count-badge">{{ drawerAgentSkillNames.length }}</span>
-              </div>
-            </template>
-            <div v-if="drawerSkillsLoading" class="skills-loading-row">
-              <el-icon class="is-loading"><Loading /></el-icon>
-              <span>加载中...</span>
-            </div>
-            <div v-else class="drawer-skills-list">
-              <div
-                v-for="skill in drawerSkillsEnriched"
-                :key="skill.name"
-                class="drawer-skill-row"
-                :class="{
-                  'skill-enabled': skill.enabled,
-                  'skill-disabled': skill.installed && !skill.enabled,
-                  'skill-uninstalled': !skill.installed,
-                }"
-              >
-                <!-- 状态指示器 -->
-                <span
-                  class="skill-status-dot"
-                  :class="{
-                    'dot-enabled': skill.enabled,
-                    'dot-disabled': skill.installed && !skill.enabled,
-                    'dot-uninstalled': !skill.installed,
-                  }"
-                  :title="skill.enabled ? '已激活' : skill.installed ? '已安装，未激活' : '未安装'"
-                />
-                <!-- 技能名称 -->
-                <div class="drawer-skill-info">
-                  <span class="drawer-skill-name">{{ skill.displayName }}</span>
-                  <span class="drawer-skill-id">{{ skill.name }}</span>
-                </div>
-                <!-- 操作按钮（仅限已安装） -->
-                <el-button
-                  v-if="skill.installed && skill.enabled"
-                  size="small"
-                  type="danger"
-                  plain
-                  :loading="drawerSkillsToggling.get(skill.name)"
-                  :disabled="drawerSkillsToggling.get(skill.name)"
-                  @click="handleDrawerSkillToggle(skill.name, false)"
-                  class="skill-toggle-btn"
-                >
-                  禁用
-                </el-button>
-                <el-button
-                  v-else-if="skill.installed && !skill.enabled"
-                  size="small"
-                  type="success"
-                  plain
-                  :loading="drawerSkillsToggling.get(skill.name)"
-                  :disabled="drawerSkillsToggling.get(skill.name)"
-                  @click="handleDrawerSkillToggle(skill.name, true)"
-                  class="skill-toggle-btn"
-                >
-                  启用
-                </el-button>
-                <span v-else class="skill-uninstalled-tag">未安装</span>
-              </div>
-            </div>
-          </el-card>
-
           <!-- Extra Details -->
           <el-card class="detail-section" shadow="never" v-if="agent.details">
             <template #header>
@@ -379,6 +360,7 @@ const historyCount = ref(0)
 const recentMessages = ref<MessageItem[]>([])
 const loadingHistory = ref(false)
 const resetting = ref(false)
+const showSkillsPanel = ref(false)
 
 // Chat send
 const chatInput = ref('')
@@ -1110,11 +1092,12 @@ watch(drawerVisible, (val) => {
       }
     }, 3000)
   } else if (!val) {
-    // 关闭抽屉时停止刷新
+    // 关闭抽屉时停止刷新，收起技能面板
     if (refreshTimer !== null) {
       clearInterval(refreshTimer)
       refreshTimer = null
     }
+    showSkillsPanel.value = false
   }
 })
 
@@ -1936,101 +1919,136 @@ watch(recentMessages, () => {
   margin: 8px 0;
 }
 
-/* ══ 专属技能 ══ */
-.skills-count-badge {
-  font-size: 11px;
+/* ══ 技能库快捷按钮（消息区 header 右侧） ══ */
+.skills-shortcut-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: rgba(255,255,255,0.04);
   color: var(--text-secondary);
-  background: rgba(255,255,255,0.08);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1;
+  white-space: nowrap;
+}
+.skills-shortcut-btn:hover {
+  border-color: var(--accent, #42a5f5);
+  color: var(--accent, #42a5f5);
+  background: rgba(66,165,245,0.08);
+}
+.skills-shortcut-btn--active {
+  border-color: var(--accent, #42a5f5);
+  color: var(--accent, #42a5f5);
+  background: rgba(66,165,245,0.12);
+}
+.shortcut-count {
+  font-size: 10px;
+  background: rgba(255,255,255,0.1);
   border-radius: 8px;
-  padding: 0 6px;
-  height: 16px;
-  line-height: 16px;
-  margin-left: 4px;
+  padding: 0 5px;
+  height: 15px;
+  line-height: 15px;
 }
 
-.skills-loading-row {
+/* ══ 内联技能面板（消息列表上方） ══ */
+.skills-inline-panel {
+  border-bottom: 1px solid var(--border-color);
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.12);
+  overflow: hidden;
+}
+
+/* 过渡动画 */
+.skills-panel-enter-active,
+.skills-panel-leave-active {
+  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+  max-height: 260px;
+}
+.skills-panel-enter-from,
+.skills-panel-leave-to {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.skills-panel-loading {
   display: flex;
   align-items: center;
   gap: 8px;
   color: var(--text-secondary);
-  font-size: 13px;
-  padding: 8px 0;
+  font-size: 12px;
+  padding: 4px 0;
 }
 
-.drawer-skills-list {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+/* 技能条目网格：两列 */
+.skills-panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
-.drawer-skill-row {
+.sp-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 6px;
-  border-radius: 6px;
-  transition: background 0.15s;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  transition: background 0.12s;
 }
-.drawer-skill-row:hover {
-  background: rgba(255,255,255,0.05);
-}
-.skill-uninstalled {
-  opacity: 0.45;
-}
+.sp-item:hover { background: rgba(255,255,255,0.05); }
+.sp-off { opacity: 0.4; }
+.sp-inactive { opacity: 0.7; }
 
 /* 3 态状态点 */
-.skill-status-dot {
-  width: 8px;
-  height: 8px;
+.sp-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
-  transition: all 0.2s;
 }
-.dot-enabled {
+.sp-dot--on {
   background: #4caf50;
-  box-shadow: 0 0 5px rgba(76,175,80,0.7);
+  box-shadow: 0 0 4px rgba(76,175,80,0.7);
 }
-.dot-disabled {
+.sp-dot--inactive {
   background: #f59e0b;
-  box-shadow: 0 0 4px rgba(245,158,11,0.5);
+  box-shadow: 0 0 3px rgba(245,158,11,0.5);
 }
-.dot-uninstalled {
+.sp-dot--off {
   background: transparent;
   border: 1.5px dashed rgba(255,255,255,0.3);
 }
 
-.drawer-skill-info {
+.sp-name {
   flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.drawer-skill-name {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.drawer-skill-id {
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0.6;
-  font-family: monospace;
+  min-width: 0;
 }
 
-.skill-toggle-btn {
+.sp-btn {
   flex-shrink: 0;
-  font-size: 11px;
-  padding: 2px 8px;
-  height: auto;
-  line-height: 1.4;
+  font-size: 10px !important;
+  padding: 1px 6px !important;
+  height: auto !important;
+  line-height: 1.4 !important;
 }
 
-.skill-uninstalled-tag {
+.sp-uninstalled {
   font-size: 10px;
-  color: rgba(255,255,255,0.25);
+  color: rgba(255,255,255,0.2);
   flex-shrink: 0;
   white-space: nowrap;
 }
