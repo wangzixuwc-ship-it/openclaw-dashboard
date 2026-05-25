@@ -7,6 +7,7 @@
 import http from 'http'
 import https from 'https'
 import fs from 'fs/promises'
+import fsSync from 'fs'
 import path from 'path'
 import os from 'os'
 import { spawn, execSync } from 'child_process'
@@ -1565,6 +1566,91 @@ const server = http.createServer(async (req, res) => {
       console.error('[agent-running-status] Error:', e.message)
       res.writeHead(500, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: e.message, agents: [] }))
+    }
+    return
+  }
+
+  // ============================================
+  // GET /api/agent-crons — 获取所有 Agent 的定时任务
+  // ============================================
+  if (pathname === '/api/agent-crons' && req.method === 'GET') {
+    const agentFilter = url.searchParams.get('agent') || null
+    try {
+      const isWindows = os.platform() === 'win32'
+      const command = isWindows ? 'openclaw.cmd' : 'openclaw'
+      const result = await runCommand(command, ['cron', 'list', '--json'], 30000)
+      if (!result.success) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ jobs: [], error: result.error }))
+        return
+      }
+      let rawOutput = result.stdout || result.stderr || ''
+      const jsonStart = rawOutput.indexOf('{')
+      if (jsonStart < 0) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ jobs: [] }))
+        return
+      }
+      const parsed = JSON.parse(rawOutput.slice(jsonStart))
+      let jobs = parsed.jobs || []
+      if (agentFilter) {
+        jobs = jobs.filter(j => j.agentId === agentFilter)
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ jobs, total: jobs.length }))
+    } catch (e) {
+      console.error('[agent-crons] Error:', e.message)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ jobs: [], error: e.message }))
+    }
+    return
+  }
+
+  // ============================================
+  // GET /api/system/skill-readme?name=lark-im — 读取技能 SKILL.md
+  // ============================================
+  if (pathname === '/api/system/skill-readme' && req.method === 'GET') {
+    const skillName = url.searchParams.get('name') || ''
+    if (!skillName || skillName.includes('..') || skillName.includes('/')) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Invalid skill name' }))
+      return
+    }
+    try {
+      const homeDir = os.homedir()
+      const skillDir = path.join(homeDir, '.openclaw', 'skills', skillName)
+      const skillMdPath = path.join(skillDir, 'SKILL.md')
+      let content = ''
+      let description = ''
+      let tools = []
+      try {
+        content = fsSync.readFileSync(skillMdPath, 'utf8')
+        // Extract frontmatter description
+        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
+        if (fmMatch) {
+          const fm = fmMatch[1]
+          // Handle quoted description: description: "..." or description: >
+          const quotedMatch = fm.match(/^description:\s*"([\s\S]*?)"\s*(?:\n|$)/m)
+          const blockMatch = !quotedMatch && fm.match(/^description:\s*>\s*\n([\s\S]*?)(?=\n\w|\n---|\n$|$)/m)
+          const inlineMatch = !quotedMatch && !blockMatch && fm.match(/^description:\s*(.+)/m)
+          if (quotedMatch) description = quotedMatch[1].replace(/\\n/g, '\n').trim()
+          else if (blockMatch) description = blockMatch[1].replace(/  /g, '').trim()
+          else if (inlineMatch) description = inlineMatch[1].trim()
+        }
+        // Truncate content to 3000 chars for the preview
+        if (content.length > 3000) content = content.slice(0, 3000) + '\n\n... (内容已截断)'
+      } catch (_) { /* file not found */ }
+      // List tools from references/
+      try {
+        const refsDir = path.join(skillDir, 'references')
+        const refFiles = fsSync.readdirSync(refsDir)
+        tools = refFiles.filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, ''))
+      } catch (_) { /* no references dir */ }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ name: skillName, description, content, tools }))
+    } catch (e) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ name: skillName, description: '', content: '', tools: [], error: e.message }))
     }
     return
   }

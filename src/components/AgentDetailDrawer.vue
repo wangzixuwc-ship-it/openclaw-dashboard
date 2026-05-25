@@ -66,7 +66,10 @@
                         :class="['sp-dot', skill.enabled ? 'sp-dot--on' : skill.installed ? 'sp-dot--inactive' : 'sp-dot--off']"
                         :title="skill.enabled ? '已激活' : skill.installed ? '已安装，未激活' : '未安装'"
                       />
-                      <span class="sp-name" :title="skill.name">{{ skill.displayName }}</span>
+                      <span class="sp-name-wrap">
+                        <span class="sp-name">{{ skill.displayName }}</span>
+                        <span v-if="skill.description" class="sp-desc" :title="skill.description">{{ skill.description }}</span>
+                      </span>
                       <el-button
                         v-if="skill.installed && skill.enabled"
                         size="small" type="danger" plain
@@ -262,6 +265,49 @@
             </div>
           </el-card>
 
+          <!-- 定时任务 -->
+          <el-card class="detail-section" shadow="never" v-if="agentCrons.length > 0">
+            <template #header>
+              <div class="section-header">
+                <el-icon><Timer /></el-icon>
+                定时任务
+                <el-tag size="small" type="info" class="cron-count-tag">{{ agentCrons.length }}</el-tag>
+              </div>
+            </template>
+            <div v-if="agentCronsLoading" class="cron-loading">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>加载中...</span>
+            </div>
+            <div v-else class="cron-list">
+              <div
+                v-for="cron in agentCrons"
+                :key="cron.id"
+                class="cron-item"
+                @click="expandedCronId = expandedCronId === cron.id ? '' : cron.id"
+              >
+                <div class="cron-item-header">
+                  <span :class="['cron-status-dot', `cron-dot--${cron.status}`]" :title="cron.status" />
+                  <span class="cron-name">{{ cron.name }}</span>
+                  <span class="cron-schedule">{{ formatCronSchedule(cron.schedule) }}</span>
+                  <el-icon class="cron-chevron" :class="expandedCronId === cron.id ? 'cron-chevron--open' : ''"><ArrowDown /></el-icon>
+                </div>
+                <div class="cron-meta">
+                  <span v-if="cron.state?.lastRunAtMs" class="cron-last">
+                    上次: {{ formatCronTime(cron.state.lastRunAtMs) }}
+                  </span>
+                  <span v-if="(cron.state?.consecutiveErrors ?? 0) > 0" class="cron-errors">
+                    连续失败 {{ cron.state?.consecutiveErrors }} 次
+                  </span>
+                </div>
+                <!-- 展开后显示任务要求 -->
+                <div v-if="expandedCronId === cron.id" class="cron-message">
+                  <div class="cron-message-label">任务要求</div>
+                  <div class="cron-message-text">{{ cron.payload?.message || '（无消息）' }}</div>
+                </div>
+              </div>
+            </div>
+          </el-card>
+
           <!-- Extra Details -->
           <el-card class="detail-section" shadow="never" v-if="agent.details">
             <template #header>
@@ -326,6 +372,7 @@ import {
   Timer,
   Promotion,
   Link,
+  ArrowDown,
 } from '@element-plus/icons-vue'
 
 interface MessageItem {
@@ -535,10 +582,11 @@ interface DrawerSkill {
   displayName: string
   installed: boolean
   enabled: boolean
+  description: string
 }
 
 const drawerAgentSkillNames = ref<string[]>([])
-const drawerAllSkills = ref<Map<string, { installed: boolean; enabled: boolean }>>(new Map())
+const drawerAllSkills = ref<Map<string, { installed: boolean; enabled: boolean; description: string }>>(new Map())
 const drawerSkillsLoading = ref(false)
 const drawerSkillsToggling = ref<Map<string, boolean>>(new Map())
 
@@ -550,6 +598,7 @@ const drawerSkillsEnriched = computed<DrawerSkill[]>(() => {
       displayName: SKILL_DISPLAY_NAMES[name] || name,
       installed: info?.installed ?? false,
       enabled: info?.enabled ?? false,
+      description: info?.description || '',
     }
   })
 })
@@ -566,9 +615,11 @@ async function fetchDrawerSkills(): Promise<void> {
     const agentCfg = (configResp.agents || []).find((a: { id: string }) => a.id === id)
     drawerAgentSkillNames.value = Array.isArray(agentCfg?.skills) ? agentCfg.skills : []
 
-    const map = new Map<string, { installed: boolean; enabled: boolean }>()
+    const map = new Map<string, { installed: boolean; enabled: boolean; description: string }>()
     for (const s of (skillsResp?.skills || [])) {
-      map.set(s.name, { installed: !!s.installed, enabled: !!s.enabled })
+      // Use API description (from SKILL.md frontmatter), truncate to 80 chars for inline display
+      const desc = (s.description || '').slice(0, 120)
+      map.set(s.name, { installed: !!s.installed, enabled: !!s.enabled, description: desc })
     }
     drawerAllSkills.value = map
   } catch (e) {
@@ -586,7 +637,7 @@ async function handleDrawerSkillToggle(skillName: string, enabled: boolean): Pro
       ElMessage.success(`"${SKILL_DISPLAY_NAMES[skillName] || skillName}" 已${enabled ? '启用' : '禁用'}`)
       // 本地更新，无需重新全量拉取
       const cur = drawerAllSkills.value.get(skillName)
-      drawerAllSkills.value.set(skillName, { installed: cur?.installed ?? true, enabled })
+      drawerAllSkills.value.set(skillName, { installed: cur?.installed ?? true, enabled, description: cur?.description ?? '' })
       drawerAllSkills.value = new Map(drawerAllSkills.value) // trigger reactivity
     } else {
       ElMessage.error(result?.message ?? `切换 "${skillName}" 失败`)
@@ -598,6 +649,86 @@ async function handleDrawerSkillToggle(skillName: string, enabled: boolean): Pro
     drawerSkillsToggling.value.delete(skillName)
     drawerSkillsToggling.value = new Map(drawerSkillsToggling.value)
   }
+}
+
+// ── 定时任务 (Cron Jobs) ──────────────────────────────────
+
+interface CronJob {
+  id: string
+  name: string
+  agentId?: string
+  enabled: boolean
+  schedule: { kind: string; expr?: string; everyMs?: number; tz?: string }
+  payload?: { message?: string; timeoutSeconds?: number }
+  state?: { nextRunAtMs?: number; lastRunAtMs?: number; consecutiveErrors?: number; lastRunStatus?: string }
+  status: string
+}
+
+const agentCrons = ref<CronJob[]>([])
+const agentCronsLoading = ref(false)
+const expandedCronId = ref('')
+
+async function fetchAgentCrons(): Promise<void> {
+  const id = drawerAgentId.value
+  if (!id) return
+  agentCronsLoading.value = true
+  try {
+    const resp = await fetch(`/api/agent-crons?agent=${encodeURIComponent(id)}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      agentCrons.value = (data.jobs || []).sort((a: CronJob, b: CronJob) =>
+        a.name.localeCompare(b.name))
+    }
+  } catch (e) {
+    console.error('[DrawerCrons] fetch error:', e)
+  } finally {
+    agentCronsLoading.value = false
+  }
+}
+
+function formatCronSchedule(schedule: CronJob['schedule']): string {
+  if (!schedule) return '?'
+  if (schedule.kind === 'every') {
+    const ms = schedule.everyMs || 0
+    if (ms < 60000) return `每${Math.round(ms / 1000)}秒`
+    if (ms < 3600000) return `每${Math.round(ms / 60000)}分钟`
+    if (ms < 86400000) return `每${Math.round(ms / 3600000)}小时`
+    return `每${Math.round(ms / 86400000)}天`
+  }
+  if (schedule.kind === 'cron') {
+    const expr = schedule.expr || ''
+    const tzLabel = schedule.tz ? ` (${schedule.tz === 'Asia/Shanghai' ? '上海' : schedule.tz})` : ''
+    const parts = expr.split(' ')
+    if (parts.length === 5) {
+      const [min, hour, dom, , dow] = parts
+      const minStr = min.padStart(2, '0')
+      const hourStr = hour.padStart(2, '0')
+      const dowMap: Record<string, string> = { '0': '日', '1': '一', '2': '二', '3': '三', '4': '四', '5': '五', '6': '六' }
+      if (min.startsWith('*/')) return `每${min.slice(2)}分钟${tzLabel}`
+      if (hour.startsWith('*/')) return `每${hour.slice(2)}小时${tzLabel}`
+      if (dom === '*' && dow === '*') return `每天 ${hourStr}:${minStr}${tzLabel}`
+      if (dom === '*' && dow !== '*') {
+        if (dow.includes(',')) {
+          const days = dow.split(',').map(d => `周${dowMap[d] || d}`).join('/')
+          return `${days} ${hourStr}:${minStr}${tzLabel}`
+        }
+        return `每周${dowMap[dow] || dow} ${hourStr}:${minStr}${tzLabel}`
+      }
+      if (dom !== '*') return `每月${dom}日 ${hourStr}:${minStr}${tzLabel}`
+    }
+    return expr + tzLabel
+  }
+  return schedule.kind || '?'
+}
+
+function formatCronTime(ms: number): string {
+  if (!ms) return '-'
+  const d = new Date(ms)
+  const now = Date.now()
+  const diff = now - ms
+  if (diff < 3600000) return `${Math.round(diff / 60000)}分钟前`
+  if (diff < 86400000) return `${Math.round(diff / 3600000)}小时前`
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 const isSpecialAgent = computed(() => {
@@ -1085,8 +1216,9 @@ watch(drawerVisible, (val) => {
   if (val && agent.value) {
     // Load history on open - 首次打开强制滚动到底部
     loadHistory(false, true)
-    // 加载技能数据
+    // 加载技能数据 + 定时任务
     fetchDrawerSkills()
+    fetchAgentCrons()
     // 抽屉打开期间定时刷新消息
     refreshTimer = setInterval(() => {
       if (drawerVisible.value && agent.value) {
@@ -2019,6 +2151,14 @@ watch(recentMessages, () => {
 .sp-item:hover { background: rgba(255,255,255,0.05); }
 .sp-off { opacity: 0.4; }
 .sp-inactive { opacity: 0.7; }
+.sp-name-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  overflow: hidden;
+}
 
 /* 3 态状态点 */
 .sp-dot {
@@ -2041,14 +2181,21 @@ watch(recentMessages, () => {
 }
 
 .sp-name {
-  flex: 1;
   font-size: 11px;
   font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+}
+.sp-desc {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
 }
 
 .sp-btn {
@@ -2064,5 +2211,64 @@ watch(recentMessages, () => {
   color: rgba(255,255,255,0.2);
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* ── 定时任务 (Cron) ── */
+.cron-count-tag { margin-left: 6px; }
+.cron-loading {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-secondary); padding: 8px 0;
+}
+.cron-list { display: flex; flex-direction: column; gap: 4px; }
+.cron-item {
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 7px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.cron-item:hover { background: rgba(255,255,255,0.04); }
+.cron-item-header {
+  display: flex; align-items: center; gap: 7px;
+}
+.cron-status-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.cron-dot--ok { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.5); }
+.cron-dot--error { background: #ef4444; box-shadow: 0 0 4px rgba(239,68,68,0.5); }
+.cron-dot--idle { background: #6b7280; }
+.cron-dot--disabled { background: rgba(255,255,255,0.15); }
+.cron-name {
+  flex: 1; font-size: 12px; font-weight: 500; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.cron-schedule {
+  font-size: 11px; color: #60a5fa; white-space: nowrap; flex-shrink: 0;
+}
+.cron-chevron {
+  flex-shrink: 0; color: var(--text-secondary); font-size: 11px;
+  transition: transform 0.2s;
+}
+.cron-chevron--open { transform: rotate(180deg); }
+.cron-meta {
+  display: flex; gap: 10px; align-items: center;
+  font-size: 10px; color: var(--text-secondary);
+  margin-top: 3px; padding-left: 14px;
+}
+.cron-errors { color: #f87171; }
+.cron-message {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.cron-message-label {
+  font-size: 10px; color: var(--text-secondary);
+  font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; margin-bottom: 4px;
+}
+.cron-message-text {
+  font-size: 12px; color: var(--text-primary);
+  line-height: 1.55; white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px; overflow-y: auto;
 }
 </style>

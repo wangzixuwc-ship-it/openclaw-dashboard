@@ -109,8 +109,10 @@
                 'skill-row',
                 skill.enabled ? 'skill-row--enabled'
                   : skill.installed ? 'skill-row--inactive'
-                  : 'skill-row--uninstalled'
+                  : 'skill-row--uninstalled',
+                expandedSkillName === skill.name ? 'skill-row--expanded' : ''
               ]"
+              @click.stop="toggleSkillExpand(skill.name)"
             >
               <div class="skill-row-status">
                 <span
@@ -129,6 +131,17 @@
                   <span class="skill-row-id">{{ skill.name }}</span>
                 </div>
                 <div class="skill-row-desc">{{ getSkillDescription(skill.name) }}</div>
+                <!-- 展开详情：工具列表 -->
+                <div v-if="expandedSkillName === skill.name" class="skill-row-expand" @click.stop>
+                  <div v-if="expandedSkillLoading" class="skill-row-expand-loading">加载中...</div>
+                  <div v-else-if="expandedSkillTools.length > 0" class="skill-row-tools">
+                    <span class="skill-tools-label">工具清单 ({{ expandedSkillTools.length }})</span>
+                    <div class="skill-tools-list">
+                      <span v-for="t in expandedSkillTools" :key="t" class="skill-tool-tag">{{ t }}</span>
+                    </div>
+                  </div>
+                  <div v-else class="skill-row-expand-loading">暂无工具信息</div>
+                </div>
               </div>
               <!-- 操作按钮（仅限已安装） -->
               <el-button
@@ -414,6 +427,34 @@ const searchResults = ref<SkillInfo[]>([])
 const searching = ref(false)
 const hasSearched = ref(false)
 
+// ── 技能详情展开 ──────────────────────────────────────────
+const expandedSkillName = ref('')
+const expandedSkillTools = ref<string[]>([])
+const expandedSkillLoading = ref(false)
+
+async function toggleSkillExpand(skillName: string): Promise<void> {
+  if (expandedSkillName.value === skillName) {
+    expandedSkillName.value = ''
+    return
+  }
+  expandedSkillName.value = skillName
+  if (expandedSkillTools.value.length > 0) return // 已经加载过了
+  expandedSkillLoading.value = true
+  try {
+    const resp = await fetch(`/api/system/skill-readme?name=${encodeURIComponent(skillName)}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      expandedSkillTools.value = data.tools || []
+    }
+  } catch (_) { /* ignore */ }
+  finally { expandedSkillLoading.value = false }
+}
+
+// 切换 skill 时重置 tools 缓存
+watch(expandedSkillName, () => {
+  expandedSkillTools.value = []
+})
+
 // ── 按 Agent tab 状态 ────────────────────────────────────
 interface AgentConfigured {
   id: string
@@ -447,7 +488,7 @@ const SKILL_DISPLAY_NAMES: Record<string, string> = {
   'lark-vc-agent': '飞书视会助手',
   'lark-whiteboard': '飞书白板',
   'lark-shared': '飞书共享资源',
-  'lark-apps': '飞书应用管理',
+  'lark-apps': '飞书妙搭部署',
   'lark-markdown': '飞书 Markdown',
   'lark-workflow-meeting-summary': '会议总结工作流',
   'lark-workflow-standup-report': '站会报告工作流',
@@ -471,6 +512,8 @@ const SKILL_DISPLAY_NAMES: Record<string, string> = {
   'apple-notes': 'Apple 备忘录',
   'apple-reminders': 'Apple 提醒事项',
   'lark-approval-extra': '飞书审批（扩展）',
+  'Feishu Task Daily Summary': '飞书任务每日汇总',
+  'healthcheck': '主机安全巡检',
 }
 
 // ── 技能中文描述 ──────────────────────────────────────────
@@ -495,7 +538,7 @@ const SKILL_DESCRIPTIONS: Record<string, string> = {
   'lark-vc-agent': '视频会议 AI 助理，会中实时辅助',
   'lark-whiteboard': '协作绘制白板，创建思维导图',
   'lark-shared': '管理共享文件和协作内容',
-  'lark-apps': '管理飞书应用，查询应用状态',
+  'lark-apps': '将本地 HTML 文件或目录部署到飞书妙搭，生成公网可访问链接；管理应用共享范围',
   'lark-markdown': '以 Markdown 格式创建飞书文档',
   'lark-workflow-meeting-summary': '自动提取会议录音，生成结构化会议摘要',
   'lark-workflow-standup-report': '汇总任务进展，自动生成站会报告',
@@ -519,6 +562,8 @@ const SKILL_DESCRIPTIONS: Record<string, string> = {
   'apple-notes': '读写系统备忘录，管理笔记内容',
   'apple-reminders': '创建和管理系统提醒事项',
   'lark-approval-extra': '扩展版飞书审批，支持自定义表单字段、条件分支和多级审批人配置',
+  'Feishu Task Daily Summary': '读取飞书任务清单，筛选未完成任务，生成每日待办汇总；支持创建、修改、关闭和归档任务',
+  'healthcheck': '对 OpenClaw 主机进行安全审计：检查 SSH 配置、防火墙规则、系统更新、磁盘加密及备份状态',
 }
 
 // ── 技能分类 ──────────────────────────────────────────────
@@ -538,9 +583,10 @@ const SKILL_CATEGORIES: Record<string, string[]> = {
   ],
   '生产力工具': [
     'diagram-maker', 'canvas', 'weather', 'apple-notes', 'apple-reminders',
+    'Feishu Task Daily Summary',
   ],
   '系统与安全': [
-    '1password',
+    '1password', 'healthcheck',
   ],
 }
 
@@ -557,7 +603,15 @@ function getSkillDisplayName(name: string): string {
 }
 
 function getSkillDescription(name: string): string {
-  return SKILL_DESCRIPTIONS[name] || '暂无中文说明'
+  // 优先使用硬编码中文描述，回退到 API 返回的 description（SKILL.md frontmatter）
+  if (SKILL_DESCRIPTIONS[name]) return SKILL_DESCRIPTIONS[name]
+  const apiSkill = skillsData.value?.skills.find(s => s.name === name)
+  if (apiSkill?.description) {
+    // 截取第一句/前80字
+    const desc = apiSkill.description.split(/[。\n]/)[0].trim()
+    return desc.slice(0, 80) || apiSkill.description.slice(0, 80)
+  }
+  return '暂无中文说明'
 }
 
 function getSkillCategory(name: string): string {
@@ -1086,6 +1140,29 @@ function formatDate(dateStr: string): string {
 }
 .skill-row-id { font-size: 11px; color: var(--text-secondary); opacity: 0.65; font-family: monospace; font-weight: 400; }
 .skill-row-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; line-height: 1.4; }
+.skill-row--expanded { background: rgba(56,189,248,0.06); border-radius: 6px; }
+.skill-row { cursor: pointer; }
+
+.skill-row-expand {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255,255,255,0.1);
+}
+.skill-row-expand-loading { font-size: 11px; color: var(--text-secondary); }
+.skill-tools-label {
+  font-size: 10px; color: var(--text-secondary);
+  font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; display: block; margin-bottom: 5px;
+}
+.skill-tools-list {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.skill-tool-tag {
+  font-size: 10px; background: rgba(56,189,248,0.1);
+  color: #60a5fa; border: 1px solid rgba(96,165,250,0.25);
+  border-radius: 4px; padding: 1px 6px;
+  font-family: monospace;
+}
 
 .skill-row-btn {
   flex-shrink: 0;
