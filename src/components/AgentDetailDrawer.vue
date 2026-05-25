@@ -35,11 +35,21 @@
                     <!-- 技能库快捷入口 -->
                     <button
                       :class="['skills-shortcut-btn', showSkillsPanel ? 'skills-shortcut-btn--active' : '']"
-                      @click="showSkillsPanel = !showSkillsPanel"
+                      @click="showSkillsPanel = !showSkillsPanel; showCronPanel = false"
                     >
                       <el-icon><Collection /></el-icon>
                       技能库
-                      <span class="shortcut-count">{{ drawerAgentSkillNames.length }}</span>
+                      <span class="shortcut-count">{{ drawerSkillsEnriched.length }}</span>
+                    </button>
+                    <!-- 定时任务快捷入口 -->
+                    <button
+                      v-if="agentCrons.length > 0"
+                      :class="['skills-shortcut-btn', showCronPanel ? 'skills-shortcut-btn--active' : '']"
+                      @click="showCronPanel = !showCronPanel; showSkillsPanel = false"
+                    >
+                      <el-icon><Timer /></el-icon>
+                      定时任务
+                      <span class="shortcut-count">{{ agentCrons.length }}</span>
                     </button>
                   </div>
                 </div>
@@ -52,9 +62,9 @@
                     <el-icon class="is-loading"><Loading /></el-icon>
                     <span>加载中...</span>
                   </div>
-                  <div v-else-if="drawerAgentSkillNames.length === 0" class="skills-panel-empty">
+                  <div v-else-if="drawerSkillsEnriched.length === 0" class="skills-panel-empty">
                     <el-icon><Collection /></el-icon>
-                    <span>该 Agent 未配置专属技能（通用对话助手）</span>
+                    <span>暂无技能数据</span>
                   </div>
                   <div v-else class="skills-panel-grid">
                     <div
@@ -87,6 +97,35 @@
                         class="sp-btn"
                       >启用</el-button>
                       <span v-else class="sp-uninstalled">未装</span>
+                    </div>
+                  </div>
+                </div>
+              </transition>
+
+              <!-- ▼ 可折叠定时任务面板 -->
+              <transition name="skills-panel">
+                <div v-if="showCronPanel" class="cron-inline-panel">
+                  <div v-if="agentCronsLoading" class="skills-panel-loading">
+                    <el-icon class="is-loading"><Loading /></el-icon>
+                    <span>加载中...</span>
+                  </div>
+                  <div v-else class="cron-inline-list">
+                    <div
+                      v-for="cron in agentCrons"
+                      :key="cron.id"
+                      class="cron-inline-item"
+                      @click="expandedCronId = expandedCronId === cron.id ? '' : cron.id"
+                    >
+                      <div class="cron-inline-header">
+                        <span :class="['cron-status-dot', `cron-dot--${cron.status}`]" />
+                        <span class="cron-inline-name">{{ cron.name }}</span>
+                        <span class="cron-inline-schedule">{{ formatCronSchedule(cron.schedule) }}</span>
+                        <span v-if="cron.state?.lastRunAtMs" class="cron-inline-last">{{ formatCronTime(cron.state.lastRunAtMs) }}</span>
+                        <el-icon class="cron-chevron" :class="expandedCronId === cron.id ? 'cron-chevron--open' : ''"><ArrowDown /></el-icon>
+                      </div>
+                      <div v-if="expandedCronId === cron.id" class="cron-inline-message" @click.stop>
+                        {{ cron.payload?.message || '（无消息）' }}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -265,49 +304,6 @@
             </div>
           </el-card>
 
-          <!-- 定时任务 -->
-          <el-card class="detail-section" shadow="never" v-if="agentCrons.length > 0">
-            <template #header>
-              <div class="section-header">
-                <el-icon><Timer /></el-icon>
-                定时任务
-                <el-tag size="small" type="info" class="cron-count-tag">{{ agentCrons.length }}</el-tag>
-              </div>
-            </template>
-            <div v-if="agentCronsLoading" class="cron-loading">
-              <el-icon class="is-loading"><Loading /></el-icon>
-              <span>加载中...</span>
-            </div>
-            <div v-else class="cron-list">
-              <div
-                v-for="cron in agentCrons"
-                :key="cron.id"
-                class="cron-item"
-                @click="expandedCronId = expandedCronId === cron.id ? '' : cron.id"
-              >
-                <div class="cron-item-header">
-                  <span :class="['cron-status-dot', `cron-dot--${cron.status}`]" :title="cron.status" />
-                  <span class="cron-name">{{ cron.name }}</span>
-                  <span class="cron-schedule">{{ formatCronSchedule(cron.schedule) }}</span>
-                  <el-icon class="cron-chevron" :class="expandedCronId === cron.id ? 'cron-chevron--open' : ''"><ArrowDown /></el-icon>
-                </div>
-                <div class="cron-meta">
-                  <span v-if="cron.state?.lastRunAtMs" class="cron-last">
-                    上次: {{ formatCronTime(cron.state.lastRunAtMs) }}
-                  </span>
-                  <span v-if="(cron.state?.consecutiveErrors ?? 0) > 0" class="cron-errors">
-                    连续失败 {{ cron.state?.consecutiveErrors }} 次
-                  </span>
-                </div>
-                <!-- 展开后显示任务要求 -->
-                <div v-if="expandedCronId === cron.id" class="cron-message">
-                  <div class="cron-message-label">任务要求</div>
-                  <div class="cron-message-text">{{ cron.payload?.message || '（无消息）' }}</div>
-                </div>
-              </div>
-            </div>
-          </el-card>
-
           <!-- Extra Details -->
           <el-card class="detail-section" shadow="never" v-if="agent.details">
             <template #header>
@@ -411,6 +407,7 @@ const recentMessages = ref<MessageItem[]>([])
 const loadingHistory = ref(false)
 const resetting = ref(false)
 const showSkillsPanel = ref(false)
+const showCronPanel = ref(false)
 
 // Chat send
 const chatInput = ref('')
@@ -612,16 +609,23 @@ async function fetchDrawerSkills(): Promise<void> {
       fetch('/api/agents-configured').then(r => r.ok ? r.json() : { agents: [] }).catch(() => ({ agents: [] })),
       getSkills(),
     ])
-    const agentCfg = (configResp.agents || []).find((a: { id: string }) => a.id === id)
-    drawerAgentSkillNames.value = Array.isArray(agentCfg?.skills) ? agentCfg.skills : []
+    const agentCfg = (configResp.agents || []).find((a: { id: string; skillsUnconstrained?: boolean }) => a.id === id)
 
     const map = new Map<string, { installed: boolean; enabled: boolean; description: string }>()
     for (const s of (skillsResp?.skills || [])) {
-      // Use API description (from SKILL.md frontmatter), truncate to 80 chars for inline display
       const desc = (s.description || '').slice(0, 120)
       map.set(s.name, { installed: !!s.installed, enabled: !!s.enabled, description: desc })
     }
     drawerAllSkills.value = map
+
+    if (agentCfg?.skillsUnconstrained) {
+      // 没有配置 skills 限制 → 继承所有已安装技能
+      drawerAgentSkillNames.value = (skillsResp?.skills || [])
+        .filter((s: Record<string, unknown>) => !!s.installed)
+        .map((s: Record<string, unknown>) => s.name as string)
+    } else {
+      drawerAgentSkillNames.value = Array.isArray(agentCfg?.skills) ? agentCfg.skills : []
+    }
   } catch (e) {
     console.error('[DrawerSkills] fetch error:', e)
   } finally {
@@ -1233,6 +1237,7 @@ watch(drawerVisible, (val) => {
       refreshTimer = null
     }
     showSkillsPanel.value = false
+    showCronPanel.value = false
   }
 })
 
@@ -2213,7 +2218,46 @@ watch(recentMessages, () => {
   white-space: nowrap;
 }
 
-/* ── 定时任务 (Cron) ── */
+/* ── 定时任务内联面板（左侧消息区，与技能面板同区域） ── */
+.cron-inline-panel {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  background: rgba(96,165,250,0.04);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.cron-inline-list { display: flex; flex-direction: column; gap: 2px; }
+.cron-inline-item {
+  padding: 5px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.cron-inline-item:hover { background: rgba(255,255,255,0.05); }
+.cron-inline-header {
+  display: flex; align-items: center; gap: 6px;
+}
+.cron-inline-name {
+  flex: 1; font-size: 11px; font-weight: 500; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.cron-inline-schedule {
+  font-size: 10px; color: #60a5fa; white-space: nowrap; flex-shrink: 0;
+}
+.cron-inline-last {
+  font-size: 10px; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0;
+}
+.cron-inline-message {
+  margin-top: 5px; padding: 6px 8px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 4px;
+  font-size: 11px; color: var(--text-primary);
+  line-height: 1.55; white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px; overflow-y: auto;
+}
+
+/* ── 定时任务 (Cron) 右侧面板残留 CSS 清理 ── */
 .cron-count-tag { margin-left: 6px; }
 .cron-loading {
   display: flex; align-items: center; gap: 8px;

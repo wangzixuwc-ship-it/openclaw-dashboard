@@ -1497,6 +1497,8 @@ const server = http.createServer(async (req, res) => {
         workspace: a.workspace || null,
         configured: true,
         skills: Array.isArray(a.skills) ? a.skills : [],
+        // 没有配置 skills 数组 = 不限制，继承所有已安装技能
+        skillsUnconstrained: !Array.isArray(a.skills),
       }))
 
       res.writeHead(200, { 'Content-Type': 'application/json' })

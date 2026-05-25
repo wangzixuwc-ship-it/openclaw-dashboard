@@ -462,6 +462,7 @@ interface AgentConfigured {
   emoji: string
   skills: string[]
   model: string
+  skillsUnconstrained?: boolean
 }
 const agentsConfigured = ref<AgentConfigured[]>([])
 const selectedAgentId = ref<string>('')
@@ -724,7 +725,9 @@ const compareSkillsByCategory = computed<Record<string, string[]>>(() => {
 /** 对比状态：某技能在某 agent 上的状态 */
 function compareStatus(skillName: string, agentId: string): 'enabled' | 'inactive' | 'absent' {
   const ag = agentsConfigured.value.find(a => a.id === agentId)
-  if (!ag || !ag.skills.includes(skillName)) return 'absent'
+  if (!ag) return 'absent'
+  // skills 数组已经在 fetchAgents 处理过 unconstrained，直接判断是否包含
+  if (!ag.skills.includes(skillName)) return 'absent'
   const info = skillsData.value?.skills.find(s => s.name === skillName)
   if (!info?.installed) return 'inactive'
   return info.enabled ? 'enabled' : 'inactive'
@@ -780,7 +783,12 @@ async function fetchAgents(): Promise<void> {
     const resp = await fetch('/api/agents-configured')
     if (resp.ok) {
       const data = await resp.json()
-      agentsConfigured.value = (data.agents || []).filter((a: AgentConfigured) => a.skills?.length > 0)
+      // 处理 skillsUnconstrained：没有限制的 agent 使用所有已安装技能
+      const allInstalled = (skillsData.value?.skills || []).filter(s => s.installed).map(s => s.name)
+      agentsConfigured.value = (data.agents || []).map((a: AgentConfigured) => ({
+        ...a,
+        skills: a.skillsUnconstrained ? allInstalled : (a.skills || []),
+      })).filter((a: AgentConfigured) => a.skills.length > 0)
       if (agentsConfigured.value.length > 0 && !selectedAgentId.value) {
         selectedAgentId.value = agentsConfigured.value[0].id
       }
