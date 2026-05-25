@@ -1515,7 +1515,18 @@ const server = http.createServer(async (req, res) => {
     try {
       const RUNNING_THRESHOLD_MS = 90 * 1000
       const now = Date.now()
-      const agentIds = ['main', 'pm', 'developer', 'tester', 'inspector', 'archivist', 'designer']
+
+      // 动态读取 openclaw.json 中的 agent 列表，避免硬编码
+      let agentIds = ['main']
+      try {
+        const configRaw = await fs.readFile(path.join(OPENCLAW_DIR, 'openclaw.json'), 'utf-8')
+        const config = JSON.parse(configRaw)
+        const list = config?.agents?.list || []
+        if (list.length > 0) agentIds = list.map(a => a.id).filter(Boolean)
+      } catch (e) {
+        console.warn('[agent-running-status] 读取 openclaw.json 失败，使用默认列表:', e.message)
+      }
+
       const results = []
 
       for (const id of agentIds) {
