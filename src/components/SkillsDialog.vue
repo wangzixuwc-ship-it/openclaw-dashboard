@@ -1,13 +1,13 @@
 <template>
   <el-dialog
     v-model="dialogVisible"
-    title="OpenClaw 技能列表"
-    width="80vh"
+    title="OpenClaw 技能库"
+    width="860px"
     :close-on-click-modal="false"
     destroy-on-close
     class="skills-dialog"
     :modal-class="'skills-dialog-modal'"
-    top="5vh"
+    top="4vh"
   >
     <!-- 顶部统计栏 -->
     <div v-if="skillsData" class="skills-stats-bar">
@@ -37,7 +37,7 @@
       <span>加载技能列表...</span>
     </div>
 
-    <!-- Tab 标签页 (REC-006) -->
+    <!-- Tab 标签页 -->
     <el-tabs v-else-if="skillsData?.skills.length" v-model="activeTab" class="skills-tabs">
       <el-tab-pane name="activated">
         <template #label>
@@ -57,6 +57,11 @@
           <el-tag size="small" type="info" class="tab-count">{{ notInstalledSkills.length }}</el-tag>
         </template>
       </el-tab-pane>
+      <el-tab-pane name="byAgent">
+        <template #label>
+          <span>按 Agent</span>
+        </template>
+      </el-tab-pane>
       <el-tab-pane name="clawhub">
         <template #label>
           <span>ClawHub</span>
@@ -64,8 +69,58 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- ClawHub 搜索模式 (REC-008) -->
-    <div v-if="activeTab === 'clawhub'" class="clawhub-search-section">
+    <!-- ══ 按 Agent tab ══ -->
+    <div v-if="activeTab === 'byAgent' && skillsData" class="by-agent-section">
+      <!-- Agent 选择器 -->
+      <div class="agent-chips">
+        <div
+          v-for="agent in agentsConfigured"
+          :key="agent.id"
+          :class="['agent-chip', selectedAgentId === agent.id ? 'agent-chip--active' : '']"
+          @click="selectedAgentId = agent.id"
+        >
+          <span class="agent-chip-emoji">{{ agent.emoji || agent.id[0].toUpperCase() }}</span>
+          <span class="agent-chip-name">{{ shortAgentName(agent.name || agent.id) }}</span>
+          <span class="agent-chip-count">{{ agent.skills.length }}</span>
+        </div>
+      </div>
+
+      <!-- 已选 Agent 的技能（按分类） -->
+      <el-scrollbar class="skills-scrollbar" v-if="selectedAgentId">
+        <div v-if="selectedAgentSkills.length === 0" class="agent-no-skills">
+          <el-empty description="该 Agent 暂未配置技能" :image-size="60" />
+        </div>
+        <template v-else v-for="(group, catName) in selectedAgentSkillsByCategory" :key="catName">
+          <div class="category-header">
+            <span class="category-icon">{{ getCategoryIcon(catName) }}</span>
+            <span class="category-name">{{ catName }}</span>
+            <span class="category-count">{{ group.length }}</span>
+          </div>
+          <div class="skills-list-compact">
+            <div
+              v-for="skill in group"
+              :key="skill.name"
+              :class="['skill-row', skill.enabled ? 'skill-row--enabled' : 'skill-row--disabled']"
+            >
+              <div class="skill-row-status">
+                <span v-if="skill.enabled" class="status-dot status-dot--on" title="已激活" />
+                <span v-else class="status-dot status-dot--off" title="未激活" />
+              </div>
+              <div class="skill-row-info">
+                <div class="skill-row-name">
+                  {{ getSkillDisplayName(skill.name) }}
+                  <span class="skill-row-id">{{ skill.name }}</span>
+                </div>
+                <div class="skill-row-desc">{{ getSkillDescription(skill.name) }}</div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </el-scrollbar>
+    </div>
+
+    <!-- ══ ClawHub 搜索模式 ══ -->
+    <div v-else-if="activeTab === 'clawhub'" class="clawhub-search-section">
       <el-input
         v-model="searchQuery"
         placeholder="搜索技能..."
@@ -78,7 +133,6 @@
         </template>
       </el-input>
 
-      <!-- 搜索结果 -->
       <el-scrollbar v-if="hasSearched" class="clawhub-scrollbar" view-class="clawhub-results-scroll">
         <div class="clawhub-results">
           <div v-if="searching" class="clawhub-loading">
@@ -89,160 +143,138 @@
             <el-empty description="未找到相关技能" :image-size="60" />
           </div>
           <div v-else class="skills-grid">
-          <el-card
-            v-for="skill in searchResults"
-            :key="'search-' + skill.name"
-            class="skill-card"
-            shadow="hover"
-          >
-            <div class="skill-status-badges">
-              <el-button
-                v-if="!skill.installed"
-                size="small"
-                type="primary"
-                plain
-                @click="handleInstall(skill.name)"
-                :loading="installingSkills.get(skill.name)"
-                :disabled="installingSkills.get(skill.name)"
-                class="install-skill-btn"
-              >
-                <template #icon>
-                  <el-icon><Download /></el-icon>
-                </template>
-                安装
-              </el-button>
-              <span v-else class="status-badge badge-enabled">
-                🟢 已安装
-              </span>
-            </div>
-
-            <div class="skill-card-inner">
-              <div class="skill-icon-wrap">
-                <el-icon :size="28" class="skill-icon skill-icon-default">
-                  <Collection />
-                </el-icon>
+            <el-card
+              v-for="skill in searchResults"
+              :key="'search-' + skill.name"
+              class="skill-card"
+              shadow="hover"
+            >
+              <div class="skill-status-badges">
+                <el-button
+                  v-if="!skill.installed"
+                  size="small"
+                  type="primary"
+                  plain
+                  @click="handleInstall(skill.name)"
+                  :loading="installingSkills.get(skill.name)"
+                  :disabled="installingSkills.get(skill.name)"
+                  class="install-skill-btn"
+                >
+                  <template #icon><el-icon><Download /></el-icon></template>
+                  安装
+                </el-button>
+                <span v-else class="status-badge badge-enabled">🟢 已安装</span>
               </div>
-
-              <div class="skill-info">
-                <div class="skill-name-row">
-                  <span class="skill-name">{{ skill.name }}</span>
+              <div class="skill-card-inner">
+                <div class="skill-icon-wrap">
+                  <el-icon :size="28" class="skill-icon skill-icon-default"><Collection /></el-icon>
                 </div>
-                <div class="skill-description" v-if="skill.description">
-                  {{ skill.description }}
-                </div>
-                <!-- REC-011: 统计信息 -->
-                <div class="skill-stats" v-if="skill.updatedAt || skill.stars !== undefined || skill.downloads !== undefined">
-                  <span v-if="skill.updatedAt" class="stat-item">
-                    📅 {{ formatDate(skill.updatedAt) }}
-                  </span>
-                  <span v-if="skill.stars !== undefined" class="stat-item">
-                    ⭐ {{ skill.stars }}
-                  </span>
-                  <span v-if="skill.downloads !== undefined" class="stat-item">
-                    📦 {{ skill.downloads }}
-                  </span>
+                <div class="skill-info">
+                  <div class="skill-name-row">
+                    <span class="skill-name">{{ skill.name }}</span>
+                  </div>
+                  <div class="skill-description" v-if="skill.description">{{ skill.description }}</div>
+                  <div class="skill-stats" v-if="skill.updatedAt || skill.stars !== undefined || skill.downloads !== undefined">
+                    <span v-if="skill.updatedAt" class="stat-item">📅 {{ formatDate(skill.updatedAt) }}</span>
+                    <span v-if="skill.stars !== undefined" class="stat-item">⭐ {{ skill.stars }}</span>
+                    <span v-if="skill.downloads !== undefined" class="stat-item">📦 {{ skill.downloads }}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          </el-card>
-        </div>
+            </el-card>
           </div>
-        </el-scrollbar>
+        </div>
+      </el-scrollbar>
 
-      <!-- 默认提示 -->
       <div v-else class="clawhub-hint">
         <el-icon :size="40" class="clawhub-hint-icon"><Search /></el-icon>
         <p class="clawhub-hint-text">在上方输入关键词搜索 ClawHub 技能</p>
       </div>
     </div>
 
-    <!-- 技能卡片列表 (已安装/未安装 tab) -->
-    <el-scrollbar v-if="skillsData?.skills.length && activeTab !== 'clawhub'" class="skills-scrollbar">
-      <div class="skills-grid">
-        <el-card
-          v-for="skill in filteredSkills"
-          :key="skill.name"
-          class="skill-card"
-          shadow="hover"
-        >
-          <!-- 右上角状态标识 (REC-006/REC-012/REC-022) -->
-          <div class="skill-status-badges">
-            <!-- REC-012: 已安装显示启用状态，未安装显示安装按钮 -->
-            <div class="install-btn-group">
-              <el-button
-                v-if="!skill.installed"
-                size="small"
-                type="primary"
-                plain
-                @click="handleInstall(skill)"
-                :loading="installingSkills.get(skill.name)"
-                :disabled="installingSkills.get(skill.name)"
-                class="install-skill-btn"
-              >
-                <template #icon>
-                  <el-icon><Download /></el-icon>
-                </template>
-                安装
-              </el-button>
-            </div>
-            <!-- REC-022: 已安装技能显示启用/禁用按钮 -->
-            <template v-if="skill.installed">
-              <el-button
-                v-if="skill.enabled"
-                size="small"
-                type="danger"
-                @click="handleToggle(skill.name, false)"
-                :loading="togglingSkills.get(skill.name)"
-                :disabled="togglingSkills.get(skill.name)"
-                class="toggle-skill-btn"
-              >
-                禁用
-              </el-button>
-              <el-button
-                v-else
-                size="small"
-                type="success"
-                @click="handleToggle(skill.name, true)"
-                :loading="togglingSkills.get(skill.name)"
-                :disabled="togglingSkills.get(skill.name)"
-                class="toggle-skill-btn"
-              >
-                启用
-              </el-button>
-            </template>
-          </div>
-
-          <div class="skill-card-inner">
-            <!-- 图标区 -->
-            <div class="skill-icon-wrap">
-              <el-icon v-if="skill.icon" :size="28" class="skill-icon">
-                <component :is="getIconComponent(skill.icon)" />
-              </el-icon>
-              <el-icon v-else :size="28" class="skill-icon skill-icon-default">
-                <Collection />
-              </el-icon>
-            </div>
-
-            <!-- 信息区 -->
-            <div class="skill-info">
-              <div class="skill-name-row">
-                <span class="skill-name">{{ skill.name }}</span>
-                <el-tag
-                  v-if="skill.status"
-                  :type="getStatusType(skill.status)"
+    <!-- ══ 技能卡片列表（已激活 / 未激活 / 未安装 tab）带分类 ══ -->
+    <el-scrollbar
+      v-else-if="skillsData?.skills.length && activeTab !== 'clawhub' && activeTab !== 'byAgent'"
+      class="skills-scrollbar"
+    >
+      <template v-for="(catSkills, catName) in filteredSkillsByCategory" :key="catName">
+        <div class="category-header">
+          <span class="category-icon">{{ getCategoryIcon(catName) }}</span>
+          <span class="category-name">{{ catName }}</span>
+          <span class="category-count">{{ catSkills.length }}</span>
+        </div>
+        <div class="skills-grid">
+          <el-card
+            v-for="skill in catSkills"
+            :key="skill.name"
+            class="skill-card"
+            shadow="hover"
+          >
+            <div class="skill-status-badges">
+              <div class="install-btn-group">
+                <el-button
+                  v-if="!skill.installed"
                   size="small"
-                  class="skill-status-tag"
+                  type="primary"
+                  plain
+                  @click="handleInstall(skill)"
+                  :loading="installingSkills.get(skill.name)"
+                  :disabled="installingSkills.get(skill.name)"
+                  class="install-skill-btn"
                 >
-                  {{ skill.status }}
-                </el-tag>
+                  <template #icon><el-icon><Download /></el-icon></template>
+                  安装
+                </el-button>
               </div>
-              <div class="skill-description" v-if="skill.description">
-                {{ skill.description }}
+              <template v-if="skill.installed">
+                <el-button
+                  v-if="skill.enabled"
+                  size="small"
+                  type="danger"
+                  @click="handleToggle(skill.name, false)"
+                  :loading="togglingSkills.get(skill.name)"
+                  :disabled="togglingSkills.get(skill.name)"
+                  class="toggle-skill-btn"
+                >
+                  禁用
+                </el-button>
+                <el-button
+                  v-else
+                  size="small"
+                  type="success"
+                  @click="handleToggle(skill.name, true)"
+                  :loading="togglingSkills.get(skill.name)"
+                  :disabled="togglingSkills.get(skill.name)"
+                  class="toggle-skill-btn"
+                >
+                  启用
+                </el-button>
+              </template>
+            </div>
+
+            <div class="skill-card-inner">
+              <div class="skill-icon-wrap">
+                <el-icon :size="28" class="skill-icon skill-icon-default"><Collection /></el-icon>
+              </div>
+              <div class="skill-info">
+                <div class="skill-name-row">
+                  <span class="skill-name">{{ getSkillDisplayName(skill.name) }}</span>
+                  <el-tag
+                    v-if="skill.status"
+                    :type="getStatusType(skill.status)"
+                    size="small"
+                    class="skill-status-tag"
+                  >
+                    {{ skill.status }}
+                  </el-tag>
+                </div>
+                <div class="skill-id-row">{{ skill.name }}</div>
+                <div class="skill-description">{{ getSkillDescription(skill.name) }}</div>
               </div>
             </div>
-          </div>
-        </el-card>
-      </div>
+          </el-card>
+        </div>
+      </template>
     </el-scrollbar>
 
     <!-- 空状态 -->
@@ -280,75 +312,252 @@ const dialogVisible = computed({
   set: (val: boolean) => emit('update:visible', val),
 })
 
+// ── 状态 ──────────────────────────────────────────────────
 const loading = ref(false)
 const skillsData = ref<SkillsResponse | null>(null)
-// REC-012: 安装中状态跟踪（按 skill name 区分）
 const installingSkills = ref<Map<string, boolean>>(new Map())
-// REC-022: 切换中状态跟踪
 const togglingSkills = ref<Map<string, boolean>>(new Map())
-
-// REC-006: Tab 标签页状态
 const activeTab = ref('activated')
-
-// REC-008: ClawHub 搜索状态
 const searchQuery = ref('')
 const searchResults = ref<SkillInfo[]>([])
 const searching = ref(false)
 const hasSearched = ref(false)
 
-/** 已安装技能 (installed === true) */
-const installedSkills = computed(() => {
-  return skillsData.value?.skills.filter(s => s.installed) ?? []
-})
+// ── 按 Agent tab 状态 ────────────────────────────────────
+interface AgentConfigured {
+  id: string
+  name: string
+  emoji: string
+  skills: string[]
+  model: string
+}
+const agentsConfigured = ref<AgentConfigured[]>([])
+const selectedAgentId = ref<string>('')
 
-/** 已激活技能 (installed === true && enabled === true) */
-const activatedSkills = computed(() => {
-  return installedSkills.value.filter(s => s.enabled) ?? []
-})
+// ── 技能中文显示名 ────────────────────────────────────────
+const SKILL_DISPLAY_NAMES: Record<string, string> = {
+  'lark-im': '飞书即时通讯',
+  'lark-task': '飞书任务',
+  'lark-calendar': '飞书日历',
+  'lark-doc': '飞书文档',
+  'lark-wiki': '飞书知识库',
+  'lark-base': '飞书多维表格',
+  'lark-sheets': '飞书电子表格',
+  'lark-drive': '飞书云盘',
+  'lark-contact': '飞书通讯录',
+  'lark-mail': '飞书邮件',
+  'lark-approval': '飞书审批',
+  'lark-attendance': '飞书考勤',
+  'lark-event': '飞书活动',
+  'lark-minutes': '飞书会议纪要',
+  'lark-okr': '飞书 OKR',
+  'lark-slides': '飞书幻灯片',
+  'lark-vc': '飞书视频会议',
+  'lark-vc-agent': '飞书视会助手',
+  'lark-whiteboard': '飞书白板',
+  'lark-shared': '飞书共享资源',
+  'lark-apps': '飞书应用管理',
+  'lark-markdown': '飞书 Markdown',
+  'lark-workflow-meeting-summary': '会议总结工作流',
+  'lark-workflow-standup-report': '站会报告工作流',
+  'lark-openapi-explorer': '飞书开放平台浏览器',
+  'lark-skill-maker': '技能制作器',
+  'feishu-toolkit': '飞书工具包',
+  'feishu-doc': '飞书文档（增强）',
+  'feishu-wiki': '飞书知识库（增强）',
+  'feishu-drive': '飞书云盘（增强）',
+  'feishu-perm': '飞书权限管理',
+  'jw-feishu-suite': '嘉维飞书套件',
+  'Feishu All-in-One': '飞书全能套件',
+  'diagram-maker': '流程图绘制',
+  'browser-automation': '浏览器自动化',
+  'python-debugpy': 'Python 调试',
+  'node-inspect-debugger': 'Node.js 调试',
+  'spike': '技术调研工具',
+  'weather': '天气查询',
+  'canvas': '画布工具',
+  '1password': '密码管理器',
+  'apple-notes': 'Apple 备忘录',
+  'apple-reminders': 'Apple 提醒事项',
+  'lark-approval-extra': '飞书审批（扩展）',
+}
 
-/** 未激活技能 (installed === true && enabled === false) */
-const deactivatedSkills = computed(() => {
-  return installedSkills.value.filter(s => !s.enabled) ?? []
-})
+// ── 技能中文描述 ──────────────────────────────────────────
+const SKILL_DESCRIPTIONS: Record<string, string> = {
+  'lark-im': '发送消息、创建群组、管理对话和频道',
+  'lark-task': '创建、分配、追踪任务，管理项目进度',
+  'lark-calendar': '查看和管理日程，创建会议邀请',
+  'lark-doc': '读写飞书文档，创建和编辑富文本内容',
+  'lark-wiki': '管理知识库页面，查询和发布知识文章',
+  'lark-base': '操作多维表格数据库，读写结构化数据',
+  'lark-sheets': '读写电子表格，执行数据计算与分析',
+  'lark-drive': '文件管理与上传下载，搜索云盘内容',
+  'lark-contact': '查询用户信息和部门结构，获取员工通讯录',
+  'lark-mail': '发送和管理邮件，设置邮件签名',
+  'lark-approval': '发起和处理审批流程，查看审批进度',
+  'lark-attendance': '查询和管理考勤数据，处理打卡记录',
+  'lark-event': '管理活动和报名，创建线上线下活动',
+  'lark-minutes': '生成和管理会议纪要，整理会议决议',
+  'lark-okr': '管理目标与关键结果，追踪 OKR 进展',
+  'lark-slides': '创建和编辑演示文稿，生成 PPT',
+  'lark-vc': '发起和管理视频会议，查询会议室',
+  'lark-vc-agent': '视频会议 AI 助理，会中实时辅助',
+  'lark-whiteboard': '协作绘制白板，创建思维导图',
+  'lark-shared': '管理共享文件和协作内容',
+  'lark-apps': '管理飞书应用，查询应用状态',
+  'lark-markdown': '以 Markdown 格式创建飞书文档',
+  'lark-workflow-meeting-summary': '自动提取会议录音，生成结构化会议摘要',
+  'lark-workflow-standup-report': '汇总任务进展，自动生成站会报告',
+  'lark-openapi-explorer': '探索和测试飞书开放平台 API',
+  'lark-skill-maker': '创建和发布自定义技能',
+  'feishu-toolkit': '通用飞书操作工具集，包含常用飞书 API 封装',
+  'feishu-doc': '高级文档操作，支持更多格式和功能',
+  'feishu-wiki': '高级知识库操作，支持树状结构管理',
+  'feishu-drive': '高级文件操作，支持批量处理和权限管理',
+  'feishu-perm': '管理文件、文档和知识库的访问权限',
+  'jw-feishu-suite': '嘉维扩展飞书功能，提供定制化业务能力',
+  'Feishu All-in-One': '整合所有飞书功能的全能套件',
+  'diagram-maker': '创建流程图、架构图和 UML 图，支持多种图表类型',
+  'browser-automation': '控制浏览器完成网页操作，抓取网页内容',
+  'python-debugpy': '调试 Python 代码，支持断点、变量查看和异常追踪',
+  'node-inspect-debugger': '调试 JavaScript/TypeScript 代码，支持 Node.js 调试协议',
+  'spike': '快速验证技术方案可行性，进行技术调研与原型测试',
+  'weather': '获取实时天气信息和未来天气预报',
+  'canvas': '创建可视化图形内容，生成图像和设计资产',
+  '1password': '安全访问密码管理器中的凭据和机密',
+  'apple-notes': '读写系统备忘录，管理笔记内容',
+  'apple-reminders': '创建和管理系统提醒事项',
+}
 
-/** 未安装技能 (installed === false) */
-const notInstalledSkills = computed(() => {
-  return skillsData.value?.skills.filter(s => !s.installed) ?? []
-})
+// ── 技能分类 ──────────────────────────────────────────────
+const SKILL_CATEGORIES: Record<string, string[]> = {
+  '飞书协作': [
+    'lark-im', 'lark-task', 'lark-calendar', 'lark-doc', 'lark-wiki',
+    'lark-base', 'lark-sheets', 'lark-drive', 'lark-contact', 'lark-mail',
+    'lark-approval', 'lark-attendance', 'lark-event', 'lark-minutes', 'lark-okr',
+    'lark-slides', 'lark-vc', 'lark-vc-agent', 'lark-whiteboard', 'lark-shared',
+    'lark-apps', 'lark-markdown', 'lark-workflow-meeting-summary', 'lark-workflow-standup-report',
+    'lark-openapi-explorer', 'lark-skill-maker',
+    'feishu-toolkit', 'feishu-doc', 'feishu-wiki', 'feishu-drive', 'feishu-perm',
+    'jw-feishu-suite', 'Feishu All-in-One',
+  ],
+  '开发工具': [
+    'browser-automation', 'python-debugpy', 'node-inspect-debugger', 'spike',
+  ],
+  '生产力工具': [
+    'diagram-maker', 'canvas', 'weather', 'apple-notes', 'apple-reminders',
+  ],
+  '系统与安全': [
+    '1password',
+  ],
+}
 
-/** REC-008: 已安装技能名集合（用于快速判断） */
-const installedNames = computed(() => {
-  const set = new Set<string>()
-  for (const s of installedSkills.value) set.add(s.name)
-  return set
-})
+const CATEGORY_ICONS: Record<string, string> = {
+  '飞书协作': '🐦',
+  '开发工具': '🔧',
+  '生产力工具': '⚡',
+  '系统与安全': '🔒',
+  '其他': '📦',
+}
 
-/** 根据当前 tab 返回筛选后的技能列表 */
+function getSkillDisplayName(name: string): string {
+  return SKILL_DISPLAY_NAMES[name] || name
+}
+
+function getSkillDescription(name: string): string {
+  return SKILL_DESCRIPTIONS[name] || '暂无中文说明'
+}
+
+function getSkillCategory(name: string): string {
+  for (const [cat, skills] of Object.entries(SKILL_CATEGORIES)) {
+    if (skills.includes(name)) return cat
+  }
+  return '其他'
+}
+
+function getCategoryIcon(catName: string): string {
+  return CATEGORY_ICONS[catName] || '📦'
+}
+
+function shortAgentName(fullName: string): string {
+  // "产品经理-怡雯" → "怡雯"
+  const dash = fullName.lastIndexOf('-')
+  if (dash >= 0 && dash < fullName.length - 1) return fullName.slice(dash + 1)
+  return fullName
+}
+
+// ── 计算属性 ──────────────────────────────────────────────
+const installedSkills = computed(() => skillsData.value?.skills.filter(s => s.installed) ?? [])
+const activatedSkills = computed(() => installedSkills.value.filter(s => s.enabled) ?? [])
+const deactivatedSkills = computed(() => installedSkills.value.filter(s => !s.enabled) ?? [])
+const notInstalledSkills = computed(() => skillsData.value?.skills.filter(s => !s.installed) ?? [])
+
 const filteredSkills = computed(() => {
   switch (activeTab.value) {
-    case 'activated':
-      return activatedSkills.value
-    case 'deactivated':
-      return deactivatedSkills.value
-    case 'notInstalled':
-      return notInstalledSkills.value
-    case 'clawhub':
-      return searchResults.value.map(s => ({
-        ...s,
-        installed: installedNames.value.has(s.name),
-      }))
-    default:
-      return skillsData.value?.skills ?? []
+    case 'activated': return activatedSkills.value
+    case 'deactivated': return deactivatedSkills.value
+    case 'notInstalled': return notInstalledSkills.value
+    default: return skillsData.value?.skills ?? []
   }
 })
 
+/** 将当前 tab 的技能按分类分组，返回有序的对象 */
+const filteredSkillsByCategory = computed(() => {
+  const result: Record<string, SkillInfo[]> = {}
+  const catOrder = Object.keys(SKILL_CATEGORIES).concat(['其他'])
+  for (const cat of catOrder) result[cat] = []
+  for (const skill of filteredSkills.value) {
+    const cat = getSkillCategory(skill.name)
+    if (!result[cat]) result[cat] = []
+    result[cat].push(skill)
+  }
+  // 移除空分类
+  for (const cat of catOrder) {
+    if (result[cat].length === 0) delete result[cat]
+  }
+  return result
+})
+
+/** 按 Agent tab：已选 Agent 的技能（与 skillsData 合并，得到 installed/enabled 状态） */
+const selectedAgentSkills = computed(() => {
+  const agent = agentsConfigured.value.find(a => a.id === selectedAgentId.value)
+  if (!agent) return []
+  return agent.skills.map(skillName => {
+    const info = skillsData.value?.skills.find(s => s.name === skillName)
+    return {
+      name: skillName,
+      installed: info?.installed ?? false,
+      enabled: info?.enabled ?? false,
+      status: info?.status || '',
+    }
+  })
+})
+
+const selectedAgentSkillsByCategory = computed(() => {
+  const result: Record<string, typeof selectedAgentSkills.value> = {}
+  const catOrder = Object.keys(SKILL_CATEGORIES).concat(['其他'])
+  for (const cat of catOrder) result[cat] = []
+  for (const skill of selectedAgentSkills.value) {
+    const cat = getSkillCategory(skill.name)
+    if (!result[cat]) result[cat] = []
+    result[cat].push(skill)
+  }
+  for (const cat of catOrder) {
+    if (result[cat].length === 0) delete result[cat]
+  }
+  return result
+})
+
+// ── watch ─────────────────────────────────────────────────
 watch(() => props.visible, async (val) => {
   if (val) {
     await nextTick()
     fetchSkills()
+    fetchAgents()
   }
 })
 
+// ── API 调用 ──────────────────────────────────────────────
 async function fetchSkills(): Promise<void> {
   loading.value = true
   try {
@@ -366,16 +575,25 @@ async function fetchSkills(): Promise<void> {
   }
 }
 
-/**
- * 搜索按钮/回车触发的入口
- */
+async function fetchAgents(): Promise<void> {
+  try {
+    const resp = await fetch('/api/agents-configured')
+    if (resp.ok) {
+      const data = await resp.json()
+      agentsConfigured.value = (data.agents || []).filter((a: AgentConfigured) => a.skills?.length > 0)
+      if (agentsConfigured.value.length > 0 && !selectedAgentId.value) {
+        selectedAgentId.value = agentsConfigured.value[0].id
+      }
+    }
+  } catch (e: unknown) {
+    console.error('[SkillsDialog] fetchAgents error:', e)
+  }
+}
+
 function handleSearch(): void {
   searchSkills(searchQuery.value)
 }
 
-/**
- * REC-008: 搜索 ClawHub 技能
- */
 async function searchSkills(query: string): Promise<void> {
   if (!query.trim()) return
   searching.value = true
@@ -397,13 +615,6 @@ async function searchSkills(query: string): Promise<void> {
   }
 }
 
-/**
- * REC-012/REC-018/REC-024: 安装技能
- * - 内置技能 (source === 'builtin') → 调用后端 /api/system/skills/install (openclaw skills install)
- * - ClawHub 技能 (source === 'clawhub') → 调用后端 /api/system/skills/install (npx clawhub install)
- * - 兼容旧调用: handleInstall('skillName') 或 handleInstall(skillObject)
- * - REC-024: 安装成功后刷新技能列表 + ClawHub 搜索结果
- */
 async function handleInstall(skill: SkillInfo | string): Promise<void> {
   const skillName = typeof skill === 'string' ? skill : skill.name
   const source = typeof skill === 'string' ? undefined : skill.source
@@ -415,7 +626,6 @@ async function handleInstall(skill: SkillInfo | string): Promise<void> {
       ElMessage.success(`"${skillName}" 安装成功`)
       installingSkills.value.delete(skillName)
       await fetchSkills()
-      // REC-024: 刷新 ClawHub 搜索结果，让刚安装的技能显示为"已安装"
       if (wasClawHubTab && hasSearched.value && searchQuery.value.trim()) {
         await searchSkills(searchQuery.value.trim())
       }
@@ -430,9 +640,6 @@ async function handleInstall(skill: SkillInfo | string): Promise<void> {
   }
 }
 
-/**
- * REC-022: 切换技能启用/禁用状态
- */
 async function handleToggle(skillName: string, enabled: boolean): Promise<void> {
   togglingSkills.value.set(skillName, true)
   try {
@@ -452,7 +659,6 @@ async function handleToggle(skillName: string, enabled: boolean): Promise<void> 
   }
 }
 
-/** 根据状态字符串返回 tag 类型 */
 function getStatusType(status: string): '' | 'success' | 'warning' | 'danger' | 'info' {
   const s = status.toLowerCase()
   if (s.includes('ready') || s.includes('active') || s.includes('enabled')) return 'success'
@@ -461,13 +667,11 @@ function getStatusType(status: string): '' | 'success' | 'warning' | 'danger' | 
   return 'warning'
 }
 
-/** REC-011: 格式化日期 */
 function formatDate(dateStr: string): string {
   try {
     const date = new Date(dateStr)
     const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
     if (diffDays === 0) return '今天'
     if (diffDays === 1) return '昨天'
     if (diffDays < 30) return `${diffDays}天前`
@@ -475,17 +679,6 @@ function formatDate(dateStr: string): string {
   } catch {
     return dateStr
   }
-}
-
-/** 根据 icon 名称返回对应的图标组件 */
-function getIconComponent(iconName: string): unknown {
-  // 当前默认使用 Collection，后续可根据后端返回的 icon 名扩展映射
-  const iconMap: Record<string, unknown> = {
-    Collection,
-    collection: Collection,
-    default: Collection,
-  }
-  return iconMap[iconName] ?? Collection
 }
 </script>
 
@@ -503,32 +696,24 @@ function getIconComponent(iconName: string): unknown {
   font-size: 14px;
 }
 
-/* ── Tab 标签页 (REC-006) ── */
-.skills-tabs {
-  margin-bottom: 16px;
+.stats-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
+.stats-label { color: var(--text-secondary); font-size: 13px; }
+.stats-value { color: var(--text-primary); font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+.stats-ready { color: #4caf50; }
+.stats-divider { width: 1px; height: 24px; background: var(--border-color); }
+.refresh-skills-btn { margin-left: auto; flex-shrink: 0; }
 
-.skills-tabs :deep(.el-tabs__header) {
-  margin-bottom: 0;
-}
-
-.skills-tabs :deep(.el-tabs__nav-wrap)::after {
-  background-color: var(--border-color);
-}
-
-.skills-tabs :deep(.el-tabs__item) {
-  color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.skills-tabs :deep(.el-tabs__item.is-active) {
-  color: var(--accent, #42a5f5);
-}
-
-.skills-tabs :deep(.el-tabs__active-bar) {
-  background-color: var(--accent, #42a5f5);
-}
+/* ── Tab ── */
+.skills-tabs { margin-bottom: 16px; }
+.skills-tabs :deep(.el-tabs__header) { margin-bottom: 0; }
+.skills-tabs :deep(.el-tabs__nav-wrap)::after { background-color: var(--border-color); }
+.skills-tabs :deep(.el-tabs__item) { color: var(--text-secondary); font-size: 14px; font-weight: 500; }
+.skills-tabs :deep(.el-tabs__item.is-active) { color: var(--accent, #42a5f5); }
+.skills-tabs :deep(.el-tabs__active-bar) { background-color: var(--accent, #42a5f5); }
 
 .tab-count {
   margin-left: 4px;
@@ -538,40 +723,7 @@ function getIconComponent(iconName: string): unknown {
   line-height: 18px;
 }
 
-.stats-item {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.stats-label {
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.stats-value {
-  color: var(--text-primary);
-  font-weight: 700;
-  font-size: 18px;
-  font-variant-numeric: tabular-nums;
-}
-
-.stats-ready {
-  color: #4caf50;
-}
-
-.stats-divider {
-  width: 1px;
-  height: 24px;
-  background: var(--border-color);
-}
-
-.refresh-skills-btn {
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-/* ── 加载状态 ── */
+/* ── 加载 ── */
 .skills-loading {
   display: flex;
   flex-direction: column;
@@ -583,175 +735,194 @@ function getIconComponent(iconName: string): unknown {
 }
 
 /* ── 滚动区域 ── */
-.skills-scrollbar {
-  height: 70vh;
+.skills-scrollbar { height: 65vh; }
+
+/* ── 分类标题 ── */
+.category-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 4px 6px;
+  margin-top: 8px;
+}
+.category-header:first-child { margin-top: 0; }
+.category-icon { font-size: 15px; }
+.category-name { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.category-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.07);
+  border-radius: 10px;
+  padding: 0 7px;
+  height: 18px;
+  line-height: 18px;
 }
 
 /* ── 卡片网格 ── */
 .skills-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-  padding: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  padding: 0 4px 12px;
 }
 
 /* ── 技能卡片 ── */
 .skill-card {
   border: 1px solid var(--border-color);
   border-radius: 10px;
-  transition: all 0.3s;
+  transition: all 0.2s;
 }
-
 .skill-card:hover {
   border-color: var(--accent);
-  box-shadow: 0 4px 16px var(--accent-glow);
-  transform: translateY(-2px);
+  box-shadow: 0 3px 12px var(--accent-glow);
+  transform: translateY(-1px);
 }
-
 .skill-card :deep(.el-card__body) {
-  padding: 14px 16px;
+  padding: 12px 14px;
   position: relative;
 }
 
-/* ── 右上角状态标识 (REC-006) ── */
 .skill-status-badges {
   position: absolute;
   top: 8px;
-  right: 12px;
+  right: 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   z-index: 1;
 }
 
-.status-badge {
-  font-size: 11px;
-  line-height: 1;
-  padding: 2px 8px;
-  border-radius: 4px;
-  white-space: nowrap;
-  letter-spacing: 0.02em;
-}
+.status-badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; white-space: nowrap; }
+.badge-enabled { color: #4caf50; background: rgba(76,175,80,0.1); }
 
-.badge-installed,
-.badge-enabled {
-  color: #4caf50;
-  background: rgba(76, 175, 80, 0.1);
-}
-
-.badge-not-installed,
-.badge-not-enabled {
-  color: #9e9e9e;
-  background: rgba(158, 158, 158, 0.1);
-}
-
-/* REC-012: 安装按钮样式 */
-.install-skill-btn {
+.install-skill-btn, .toggle-skill-btn {
   font-size: 11px;
   padding: 4px 10px;
   height: auto;
   line-height: 1;
 }
+.install-skill-btn :deep(.el-icon) { font-size: 11px; }
+.install-btn-group { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 
-.install-skill-btn :deep(.el-icon) {
-  font-size: 11px;
-}
-
-/* REC-022: 启用/禁用按钮样式 */
-.toggle-skill-btn {
-  font-size: 11px;
-  padding: 4px 10px;
-  height: auto;
-  line-height: 1;
-}
-
-/* REC-018: 安装按钮组 + 来源标签 */
-.install-btn-group {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
-
-.source-tag {
-  font-size: 10px;
-  padding: 0 4px;
-  height: 16px;
-  line-height: 16px;
-  opacity: 0.8;
-}
-
-.skill-card-inner {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-}
-
+.skill-card-inner { display: flex; gap: 12px; align-items: flex-start; }
 .skill-icon-wrap {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background: rgba(66, 165, 245, 0.15);
-  color: #42a5f5;
-}
-
-.skill-icon-default {
-  background: rgba(159, 122, 234, 0.15);
+  background: rgba(159,122,234,0.15);
   color: #9f7aea;
 }
-
-.skill-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.skill-name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.skill-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.skill-status-tag {
-  flex-shrink: 0;
-}
-
+.skill-icon-default { background: rgba(159,122,234,0.15); color: #9f7aea; }
+.skill-info { flex: 1; min-width: 0; }
+.skill-name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.skill-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.skill-id-row { font-size: 10px; color: var(--text-secondary); opacity: 0.7; margin-bottom: 3px; font-family: monospace; }
+.skill-status-tag { flex-shrink: 0; }
 .skill-description {
   font-size: 12px;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.45;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-/* ── REC-011: 统计信息 ── */
-.skill-stats {
+/* ── 按 Agent tab ── */
+.by-agent-section {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-color);
+  flex-direction: column;
+  gap: 14px;
 }
 
-.stat-item {
-  font-size: 11px;
-  color: var(--text-secondary, #999);
-  white-space: nowrap;
-  letter-spacing: 0.02em;
+.agent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
 }
+
+.agent-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  background: var(--bg-elevated);
+  transition: all 0.2s;
+  user-select: none;
+}
+.agent-chip:hover {
+  border-color: var(--accent, #42a5f5);
+  background: rgba(66,165,245,0.08);
+}
+.agent-chip--active {
+  border-color: var(--accent, #42a5f5);
+  background: rgba(66,165,245,0.15);
+}
+.agent-chip-emoji { font-size: 16px; }
+.agent-chip-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.agent-chip-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 1px 6px;
+}
+
+.agent-no-skills { padding: 30px 0; }
+
+/* 按 Agent tab 技能列表（列表式，更紧凑） */
+.skills-list-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 4px 14px;
+}
+
+.skill-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: background 0.15s;
+}
+.skill-row:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: var(--border-color);
+}
+.skill-row--disabled { opacity: 0.55; }
+
+.skill-row-status { padding-top: 4px; flex-shrink: 0; }
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.status-dot--on { background: #4caf50; box-shadow: 0 0 4px rgba(76,175,80,0.6); }
+.status-dot--off { background: rgba(255,255,255,0.2); }
+
+.skill-row-info { flex: 1; min-width: 0; }
+.skill-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.skill-row-id { font-size: 11px; color: var(--text-secondary); opacity: 0.65; font-family: monospace; font-weight: 400; }
+.skill-row-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; line-height: 1.4; }
 
 /* ── 弹框样式 ── */
 :deep(.skills-dialog.el-dialog) {
@@ -759,18 +930,13 @@ function getIconComponent(iconName: string): unknown {
   border: 1px solid var(--border-color) !important;
   border-radius: 12px !important;
 }
-
 :deep(.skills-dialog .el-dialog__header) {
   background-color: var(--bg-card) !important;
   border-bottom: 1px solid var(--border-color) !important;
   padding: 16px 20px !important;
   margin-right: 0 !important;
 }
-
-:deep(.skills-dialog .el-dialog__title) {
-  color: var(--text-primary) !important;
-}
-
+:deep(.skills-dialog .el-dialog__title) { color: var(--text-primary) !important; }
 :deep(.skills-dialog .el-dialog__body) {
   background-color: var(--bg-card) !important;
   padding: 20px !important;
@@ -778,80 +944,23 @@ function getIconComponent(iconName: string): unknown {
   max-height: 90vh !important;
   overflow-y: auto !important;
 }
+:deep(.skills-dialog .el-dialog__close) { color: var(--text-primary) !important; }
+:deep(.skills-dialog .el-dialog__close):hover { color: var(--accent, #38bdf8) !important; }
 
-:deep(.skills-dialog .el-dialog__close) {
-  color: var(--text-primary) !important;
-}
+/* ── ClawHub ── */
+.clawhub-search-section { display: flex; flex-direction: column; gap: 16px; }
+.clawhub-search-input { width: 100%; }
+.clawhub-search-input :deep(.el-input__wrapper) { border-radius: 8px; }
+.clawhub-results { display: flex; flex-direction: column; gap: 8px; }
+.clawhub-scrollbar { height: 60vh; }
+.clawhub-results-scroll { padding: 4px; }
+.clawhub-loading { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 32px 0; color: var(--text-secondary); font-size: 14px; }
+.clawhub-empty { padding: 16px 0; }
+.clawhub-hint { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--text-secondary); }
+.clawhub-hint-icon { color: var(--border-color); margin-bottom: 12px; }
+.clawhub-hint-text { font-size: 14px; color: var(--text-secondary); margin: 0; }
 
-:deep(.skills-dialog .el-dialog__close):hover {
-  color: var(--accent, #38bdf8) !important;
-}
-
-.skills-dialog-modal {
-  background-color: rgba(0, 0, 0, 0.5);
-}
-
-/* ── REC-008: ClawHub 搜索模式 ── */
-.clawhub-search-section {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.clawhub-search-input {
-  width: 100%;
-}
-
-.clawhub-search-input :deep(.el-input__wrapper) {
-  border-radius: 8px;
-}
-
-.clawhub-results {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.clawhub-scrollbar {
-  height: 60vh;
-}
-
-.clawhub-results-scroll {
-  padding: 4px;
-}
-
-.clawhub-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 32px 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-.clawhub-empty {
-  padding: 16px 0;
-}
-
-/* ClawHub 提示 */
-.clawhub-hint {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-  color: var(--text-secondary);
-}
-
-.clawhub-hint-icon {
-  color: var(--border-color);
-  margin-bottom: 12px;
-}
-
-.clawhub-hint-text {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin: 0;
-}
+/* ── 统计信息 ── */
+.skill-stats { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color); }
+.stat-item { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
 </style>

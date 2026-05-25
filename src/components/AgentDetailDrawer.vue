@@ -174,6 +174,41 @@
             </div>
           </el-card>
 
+          <!-- 历史 Token & 模型消耗明细 -->
+          <el-card class="detail-section" shadow="never" v-if="agentHistoricalTokens > 0 || agentModelBreakdown.length > 0">
+            <template #header>
+              <div class="section-header">
+                <el-icon><Odometer /></el-icon>
+                历史 Token 消耗
+              </div>
+            </template>
+            <div class="hist-token-panel">
+              <div class="hist-total-row">
+                <span class="hist-label">累计消耗</span>
+                <span class="hist-value">{{ formatTokens(agentHistoricalTokens) }}</span>
+              </div>
+              <div v-if="agentModelBreakdown.length > 0" class="model-breakdown">
+                <div
+                  v-for="row in agentModelBreakdown"
+                  :key="row.model"
+                  class="model-breakdown-row"
+                >
+                  <span class="model-dot" :style="{ background: row.color }"></span>
+                  <span class="model-label">{{ row.displayName }}</span>
+                  <span class="model-tokens">{{ formatTokens(row.tokens) }}</span>
+                  <el-progress
+                    :percentage="row.pct"
+                    :stroke-width="5"
+                    :show-text="false"
+                    :color="row.color"
+                    class="model-pct-bar"
+                  />
+                  <span class="model-pct-text">{{ row.pct }}%</span>
+                </div>
+              </div>
+            </div>
+          </el-card>
+
           <!-- Extra Details -->
           <el-card class="detail-section" shadow="never" v-if="agent.details">
             <template #header>
@@ -215,11 +250,13 @@ import DOMPurify from 'dompurify'
 import type { AgentInfo } from '../stores/agent'
 import { useAgentStore } from '../stores/agent'
 import { ToolRestrictedError } from '../api/gateway'
+import { getAuthToken } from '../config/auth'
 import { ElMessage, ElMessageBox, ElImageViewer } from 'element-plus'
 import {
   UserFilled,
   InfoFilled,
   Coin,
+  Odometer,
   ChatDotRound,
   Document,
   Refresh,
@@ -289,11 +326,16 @@ const filteredMessages = computed(() => {
   })
 })
 
-// REC-041: 在 WebUI 中打开当前会话
+// REC-041: 在 WebUI 中打开当前会话（携带 token 实现免登录）
 function openSessionInWebUI(): void {
   if (!agent.value?.key) return
+  const token = getAuthToken()
   const sessionKey = encodeURIComponent(agent.value.key || '')
-  window.open(`http://localhost:18789/session/chat?session=${sessionKey}`, '_blank')
+  const base = import.meta.env.VITE_GATEWAY_URL || 'http://localhost:18789'
+  const url = token
+    ? `${base}/session/chat?session=${sessionKey}&token=${encodeURIComponent(token)}`
+    : `${base}/session/chat?session=${sessionKey}`
+  window.open(url, '_blank')
 }
 
 // 粘贴的图片附件
@@ -354,6 +396,62 @@ const statusIcon = computed(() => {
 const formattedDuration = computed(() => {
   return store.formatDuration(agent.value?.elapsedMs ?? 0)
 })
+
+// ── 历史 Token 消耗（按模型拆分）──
+const MODEL_COLORS: Record<string, string> = {
+  'deepseek-v4-pro': '#4f6ef7',
+  'MiniMax-M2.7': '#10b981',
+  'claude-sonnet-4-6': '#f59e0b',
+  'claude-sonnet-4-5': '#f59e0b',
+  'claude-opus-4': '#f97316',
+  'gpt-4o': '#6366f1',
+}
+const MODEL_DISPLAY: Record<string, string> = {
+  'deepseek-v4-pro': 'DeepSeek V4 Pro',
+  'deepseek-v3': 'DeepSeek V3',
+  'MiniMax-M2.7': 'MiniMax M2.7',
+  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
+  'claude-sonnet-4-5': 'Claude Sonnet 4.5',
+  'claude-opus-4': 'Claude Opus 4',
+  'gpt-4o': 'GPT-4o',
+  'gpt-4o-mini': 'GPT-4o Mini',
+}
+const FALLBACK_COLORS = ['#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
+let colorIdx = 0
+const dynamicColors: Record<string, string> = {}
+function modelColor(m: string): string {
+  if (MODEL_COLORS[m]) return MODEL_COLORS[m]
+  if (!dynamicColors[m]) { dynamicColors[m] = FALLBACK_COLORS[colorIdx++ % FALLBACK_COLORS.length] }
+  return dynamicColors[m]
+}
+
+const drawerAgentId = computed(() => {
+  const parts = (agent.value?.key || '').split(':')
+  return (parts[0] === 'agent' && parts.length >= 2) ? parts[1] : parts[0]
+})
+
+const agentHistoricalTokens = computed(() => store.getAgentHistoricalTokens(drawerAgentId.value))
+
+const agentModelBreakdown = computed(() => {
+  const byModel = store.globalUsage.byAgentByModel?.[drawerAgentId.value]
+  if (!byModel) return []
+  const total = agentHistoricalTokens.value || 1
+  return Object.entries(byModel)
+    .map(([model, data]) => ({
+      model,
+      displayName: MODEL_DISPLAY[model] || model,
+      tokens: data.tokens,
+      pct: Math.round((data.tokens / total) * 100),
+      color: modelColor(model),
+    }))
+    .sort((a, b) => b.tokens - a.tokens)
+})
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
+  return n.toString()
+}
 
 const isSpecialAgent = computed(() => {
   return agent.value?.name === '副总' || agent.value?.name === '执行秘书'
@@ -1291,6 +1389,79 @@ watch(recentMessages, () => {
   max-height: 200px;
   overflow-y: auto;
   color: var(--text-primary);
+}
+
+/* ── 历史 Token 明细 ── */
+.hist-token-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hist-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.hist-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.hist-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #f59e0b;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-breakdown-row {
+  display: grid;
+  grid-template-columns: 8px 1fr auto 80px 36px;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.model-label {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-tokens {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.model-pct-bar {
+  width: 80px;
+}
+
+.model-pct-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
 }
 
 /* ═══════════ 聊天发送区域 ═══════════ */

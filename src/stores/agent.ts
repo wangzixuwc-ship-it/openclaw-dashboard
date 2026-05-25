@@ -424,12 +424,31 @@ export const useAgentStore = defineStore('agent', () => {
         if (ra.id && ra.status) runningStatusMap.set(ra.id as string, ra.status as AgentStatus)
       }
 
+      // 构建 emoji map（从 agents-configured，用于补全 session agents 的头像）
+      const configuredEmojiMap = new Map<string, string>()
+      const configuredModelMap = new Map<string, string>()
+      for (const c of configuredAgents) {
+        if (c.id) {
+          if (c.emoji) configuredEmojiMap.set(c.id, c.emoji)
+          if (c.model) configuredModelMap.set(c.id, c.model)
+        }
+      }
+
       // 规范化 sessions_list 返回的会话；若 mtime 显示 running 则强制覆盖 done 状态
+      // 同时从 configuredAgents 补全 emoji（normalizeAgent 不携带 emoji）
       const sessionAgents = sessions.map((s: any) => {
         const agent = normalizeAgent(s)
         const agentId = (agent.key || '').split(':')[1] || ''
         if (runningStatusMap.get(agentId) === 'running' && agent.status !== 'running') {
           agent.status = 'running'
+        }
+        // 补全 emoji（configured 数据有，session 数据没有）
+        if (!agent.emoji && configuredEmojiMap.has(agentId)) {
+          agent.emoji = configuredEmojiMap.get(agentId)
+        }
+        // 补全 model（若 session 没返回 model，用配置中的默认）
+        if (!agent.model && configuredModelMap.has(agentId)) {
+          agent.model = configuredModelMap.get(agentId)
         }
         return agent
       })
@@ -440,7 +459,9 @@ export const useAgentStore = defineStore('agent', () => {
         return parts[1] || ''
       }).filter(Boolean))
 
-      // 已配置但无 webchat 会话的 agent → 使用文件 mtime 实时状态（替代硬编码 idle）
+      // 已配置但无 webchat 会话的 agent → 使用文件 mtime 实时状态
+      // 注意：不预先设置 historicalTokens，让 AgentCard 通过响应式 getAgentHistoricalTokens()
+      // 读取，避免 globalUsage 并行加载时竞争条件导致永远为 0
       const configuredOnlyAgents: AgentInfo[] = configuredAgents
         .filter((c: any) => !sessionAgentIds.has(c.id))
         .map((c: any) => ({
@@ -453,7 +474,7 @@ export const useAgentStore = defineStore('agent', () => {
           kind: 'configured',
           channel: 'none',
           emoji: c.emoji || '',
-          historicalTokens: globalUsage.value.byAgent?.[c.id]?.tokens || 0,
+          // historicalTokens 故意不设置，走 AgentCard 的响应式 computed 路径
         }))
 
       agents.value = [...sessionAgents, ...configuredOnlyAgents]

@@ -111,7 +111,7 @@
               {{ workflowData.mode }}
             </el-tag>
           </div>
-          <div>
+          <div v-if="workflowData.steps.length > 0 && workflowData.activeStep >= 0">
             <span class="workflow-step-label">
               第 {{ workflowData.activeStep + 1 }} / {{ workflowData.steps.length }} 步
             </span>
@@ -304,6 +304,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAgentStore, type AgentInfo } from '../stores/agent'
+import { getAuthToken } from '../config/auth'
 import AgentCard from '../components/AgentCard.vue'
 import AgentDetailDrawer from '../components/AgentDetailDrawer.vue'
 import TokenDetailDialog from '../components/TokenDetailDialog.vue'
@@ -427,9 +428,12 @@ function checkLoadingHint(): void {
   }
 }
 
-/** 打开 OpenClaw WebUI */
+/** 打开 OpenClaw WebUI（携带 token 实现免登录） */
 function openWebUI(): void {
-  window.open('http://localhost:18789', '_blank');
+  const token = getAuthToken()
+  const base = import.meta.env.VITE_GATEWAY_URL || 'http://localhost:18789'
+  const url = token ? `${base}?token=${encodeURIComponent(token)}` : base
+  window.open(url, '_blank')
 }
 
 // Stats cards

@@ -1495,6 +1495,7 @@ const server = http.createServer(async (req, res) => {
         model: a.model || (config?.agents?.defaults?.model?.primary || 'unknown'),
         workspace: a.workspace || null,
         configured: true,
+        skills: Array.isArray(a.skills) ? a.skills : [],
       }))
 
       res.writeHead(200, { 'Content-Type': 'application/json' })
