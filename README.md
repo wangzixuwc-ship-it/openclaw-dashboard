@@ -203,9 +203,11 @@ VITE_ELECTRICITY_PRICE=0.6                  # 电费单价（元/度），本地
 
 ## 📸 截图预览
 
-> Dashboard 主界面
+> Dashboard 主界面 — 7 个 Agent 实时监控，含上下文用量进度条
 
 ![主界面](image.png)
+
+> 点击 Agent 卡片展开详情，可查看对话历史、实时活动、技能配置、定时任务等
 
 ---
 
