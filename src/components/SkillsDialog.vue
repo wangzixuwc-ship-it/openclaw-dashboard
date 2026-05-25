@@ -316,11 +316,6 @@ const notInstalledSkills = computed(() => {
   return skillsData.value?.skills.filter(s => !s.installed) ?? []
 })
 
-/** ClawHub 技能 (enabled === true) */
-const clawhubSkills = computed(() => {
-  return skillsData.value?.skills.filter(s => s.enabled) ?? []
-})
-
 /** REC-008: 已安装技能名集合（用于快速判断） */
 const installedNames = computed(() => {
   const set = new Set<string>()
@@ -400,12 +395,6 @@ async function searchSkills(query: string): Promise<void> {
   } finally {
     searching.value = false
   }
-}
-
-/** REC-008: 清空搜索 */
-function onClearSearch(): void {
-  searchResults.value = []
-  hasSearched.value = false
 }
 
 /**

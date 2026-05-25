@@ -158,7 +158,7 @@
             {{ store.idleAgents.length }} 个
           </el-tag>
         </div>
-        <div class="board-column-tasks" v-loading="store.loading && store.agents.length === 0">
+        <div class="board-column-tasks" v-loading="store.isPolling && store.agents.length === 0">
           <AgentCard
             v-for="agent in store.idleAgents"
             :key="agent.key"
@@ -166,7 +166,7 @@
             :latest-messages="store.getAgentBubbles(agent.key)"
             @detail="onAgentDetail"
           />
-          <el-empty v-if="store.idleAgents.length === 0 && !store.loading" description="暂无空闲的 Agent" :image-size="50" />
+          <el-empty v-if="store.idleAgents.length === 0 && !store.isPolling" description="暂无空闲的 Agent" :image-size="50" />
         </div>
       </div>
 
@@ -313,7 +313,6 @@ import SkillsDialog from '../components/SkillsDialog.vue'
 import { type WorkflowData } from '../data/workflow-steps'
 import {
   Monitor,
-  Collection,
   CircleCheck,
   Warning,
   Odometer,
@@ -326,7 +325,7 @@ import {
   Briefcase,
   Link
 } from '@element-plus/icons-vue'
-import { el } from 'element-plus/es/locale/index.mjs'
+// el import removed (unused)
 
 // App version from package.json (injected by Vite define)
 const APP_VERSION: string = __APP_VERSION__
@@ -412,7 +411,7 @@ let loadingHintTimer: ReturnType<typeof setTimeout> | null = null
 let loadingCheckTimer: ReturnType<typeof setInterval> | null = null
 
 function checkLoadingHint(): void {
-  if (store.loading) {
+  if (store.isPolling) {
     if (!loadingHintVisible.value && !loadingHintTimer) {
       loadingHintTimer = setTimeout(() => {
         loadingHintVisible.value = true

@@ -81,7 +81,6 @@ class GatewayWebSocket {
   private status: WsConnection['status'] = 'disconnected'
   private options: Required<WsOptions>
   private manualDisconnect = false
-  private handshakeDone = false
   private requestIdCounter = 0
 
   constructor(options: Partial<WsOptions> = {}) {
@@ -151,7 +150,6 @@ class GatewayWebSocket {
 
     this.status = 'connecting'
     this.manualDisconnect = false
-    this.handshakeDone = false
 
     const url = buildWsUrl()
 
@@ -173,9 +171,6 @@ class GatewayWebSocket {
 
         // Step 1: Handle connect.challenge from server
         if (data?.type === 'event' && data?.event === 'connect.challenge') {
-          const payload = data.payload as Record<string, unknown>
-          const nonce = (payload?.nonce as string) || ''
-
           // Trusted same-process backend client — client.id 必须为 "gateway-client"
           // See: https://docs.openclaw.ai/gateway/protocol (Trusted same-process backend clients section)
           const connectReq = {
@@ -201,8 +196,7 @@ class GatewayWebSocket {
         }
 
         // Step 2: Handle connect response (hello-ok)
-        if (data?.type === 'res' && data?.ok === true && data?.payload?.type === 'hello-ok') {
-          this.handshakeDone = true
+        if (data?.type === 'res' && data?.ok === true && (data?.payload as Record<string, unknown>)?.type === 'hello-ok') {
           this.status = 'connected'
           this.startHeartbeat()
           const features = (data.payload as Record<string, unknown>).features as Record<string, unknown> | undefined
@@ -274,7 +268,7 @@ class GatewayWebSocket {
         this.handlers.error.forEach((h) => h(error))
       }
 
-      this.ws.onclose = (event: CloseEvent) => {
+      this.ws.onclose = (_event: CloseEvent) => {
         this.status = 'disconnected'
         this.stopHeartbeat()
         this.handlers.close.forEach((h) => h())
@@ -306,7 +300,6 @@ class GatewayWebSocket {
     }
     this.status = 'disconnected'
     this.retryCount = 0
-    this.handshakeDone = false
   }
 
   send(data: string | Record<string, unknown>): void {

@@ -34,7 +34,7 @@ gatewayApi.interceptors.response.use(
       }
       // If result.content exists with text field, parse JSON
       if (result?.content && Array.isArray(result.content)) {
-        const textItem = result.content.find((c) => c.type === 'text')
+        const textItem = result.content.find((c: Record<string, unknown>) => c.type === 'text')
         if (textItem?.text) {
           try {
             return JSON.parse(textItem.text)
@@ -182,50 +182,6 @@ export class ToolRestrictedError extends Error {
 }
 
 /**
- * 工具可用性缓存 (key: toolName, value: boolean)
- */
-const toolAvailabilityCache = new Map<string, { ok: boolean; expireAt: number }>()
-
-/**
- * 前置检测：某个工具是否被 Gateway 允许调用
- * 通过轻量探测 + 缓存实现，避免每次都触发完整调用
- */
-async function isToolAvailable(toolName: string, cacheTtlMs = 60_000): Promise<boolean> {
-  const now = Date.now()
-  const cached = toolAvailabilityCache.get(toolName)
-  if (cached && cached.expireAt > now) return cached.ok
-
-  try {
-    // 用空参数做一次探测调用
-    const body: Record<string, unknown> = { tool: toolName, action: 'json', args: {} }
-    const resp = await gatewayApi.post('/tools/invoke', body)
-    // 如果 interceptor 没有 reject，说明调用成功（或至少未被安全策略拒绝）
-    const data = resp?.data ?? resp
-    // Check inner result status — a tool call can return ok: true at HTTP level
-    // but the actual tool execution may have failed (e.g., missing scope)
-    const innerError = data?.result?.error || data?.error
-    const innerStatus = data?.result?.status
-    const ok = data?.ok === true && !innerError && innerStatus !== 'error'
-    toolAvailabilityCache.set(toolName, { ok, expireAt: now + cacheTtlMs })
-    return ok
-  } catch (e: any) {
-    const status = e?.response?.status
-    const errData = e?.response?.data
-    const msg = String(errData?.error?.message ?? errData?.message ?? e?.message ?? '')
-    // 403 / "denied" / "not available" / "not allowed" → 安全策略拒绝，缓存不可用
-    const isRestricted =
-      status === 403 ||
-      /denied|forbidden|not\s+available|not\s+allowed|tool.*restrict|invoke.*reject/i.test(msg)
-    if (isRestricted) {
-      // 安全策略拒绝：缓存"不可用"，正常 TTL
-      toolAvailabilityCache.set(toolName, { ok: false, expireAt: now + cacheTtlMs })
-    }
-    // 技术异常（网络超时、500、ECONNREFUSED）：不写缓存，下次重新探测
-    return false
-  }
-}
-
-/**
  * Reset session (重置会话)
  * 通过后端 POST /reset API（REC-005 修复：替代 WebSocket chat.send，避免 operator.write 权限问题）
  * 后端 API 格式：POST /reset，Body: { "agentId": "frontend" }
@@ -279,7 +235,7 @@ export async function deleteSession(key: string): Promise<{
     try {
       // 3. 先 abort（终止运行中任务，F-10）
       try {
-        abortResult = await ws.request('sessions.abort', { key })
+        abortResult = await ws.request('sessions.abort', { key }) as object
       } catch (abortErr: any) {
         // abort 失败不影响后续 delete 尝试（空闲会话 abort 可能报错）
         console.warn('[Gateway] sessions.abort non-fatal:', abortErr?.message || abortErr)

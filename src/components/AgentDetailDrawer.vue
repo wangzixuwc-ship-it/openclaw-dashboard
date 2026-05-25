@@ -131,7 +131,7 @@
               </div>
               <div class="info-item" v-if="agent.lastActivity">
                 <span class="info-label">最后活跃</span>
-                <span class="info-value">{{ formatTime(agent.lastActivity) }}</span>
+                <span class="info-value">{{ formatTime(String(agent.lastActivity)) }}</span>
               </div>
               <div class="info-item">
                 <span class="info-label">运行时长</span>
@@ -206,7 +206,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, type Component } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
@@ -230,10 +230,6 @@ import {
   WarningFilled,
   CircleCloseFilled,
   QuestionFilled,
-  ChatLineSquare,
-  User,
-  Monitor,
-  Finished,
   Avatar,
   Timer,
   Promotion,
@@ -356,7 +352,7 @@ const statusIcon = computed(() => {
 })
 
 const formattedDuration = computed(() => {
-  return store.formatDuration(agent.value?.elapsedMs)
+  return store.formatDuration(agent.value?.elapsedMs ?? 0)
 })
 
 const isSpecialAgent = computed(() => {
@@ -391,30 +387,6 @@ const tokenProgressStatus = computed(() => {
   if (p >= 70) return 'warning'
   return 'success'
 })
-
-// Role icon mapping
-function roleIcon(msg: MessageItem): Component {
-  switch (msg.role.toLowerCase()) {
-    case 'user': return User
-    case 'assistant': return ChatLineSquare
-    case 'thinking': return ChatLineSquare
-    case 'tool': return ChatLineSquare
-    case 'system': return Monitor
-    default: return Finished
-  }
-}
-
-// Message class
-function messageClass(msg: MessageItem): string {
-  switch (msg.role.toLowerCase()) {
-    case 'user': return 'msg-user'
-    case 'assistant': return 'msg-assistant'
-    case 'thinking': return 'msg-thinking'
-    case 'tool': return 'msg-tool'
-    case 'system': return 'msg-system'
-    default: return 'msg-other'
-  }
-}
 
 function bubbleClass(msg: MessageItem): string {
   if (msg.role === 'user') return 'bubble-user'
@@ -469,27 +441,6 @@ function cleanContent(raw: string): string {
   // 5. 合并过多空行（保留一个空行作为段落分隔），防止相邻行意外形成表格
   text = text.replace(/\n{3,}/g, '\n\n').trim()
   return text
-}
-
-function truncate(str: string, len: number): string {
-  if (!str) return ''
-  return str.length > len ? str.slice(0, len) + '...' : str
-}
-
-/** 去除常见 markdown 语法，提取纯文本（用于 tooltip） */
-function stripMarkdown(text: string): string {
-  if (!text) return ''
-  return text
-    .replace(/^#{1,6}\s+/gm, '')           // 标题标记
-    .replace(/(\*{1,3}|_{1,3})(.+?)\1/g, '$2') // 粗体/斜体
-    .replace(/`{1,3}(.+?)`{1,3}/g, '$1')   // 行内代码 / 代码块标记
-    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')  // 链接 [text](url) → text
-    .replace(/!\[([^\]]*)]\([^)]+\)/g, '$1') // 图片 ![alt](url) → alt
-    .replace(/^>\s+/gm, '')                // 引用标记
-    .replace(/[-*+]\s+/g, '')              // 无序列表标记
-    .replace(/^\d+\.\s+/gm, '')            // 有序列表标记
-    .replace(/\s{2,}/g, ' ')               // 合并空白
-    .trim()
 }
 
 // Configure marked with highlight.js for code syntax highlighting

@@ -90,8 +90,6 @@ const result = ref<DoctorResult | null>(null)
 // Status states: 'idle' | 'running' | 'success' | 'failed'
 const status = ref<'idle' | 'running' | 'success' | 'failed'>('idle')
 
-const done = computed(() => status.value === 'success' || status.value === 'failed')
-
 const statusText = computed(() => {
   switch (status.value) {
     case 'idle': return '等待执行...'
@@ -169,10 +167,6 @@ async function runDiagnosis(): Promise<void> {
   }
 }
 
-function handleRefreshAndClose(): void {
-  emit('refresh')
-  dialogVisible.value = false
-}
 </script>
 
 <style scoped>

@@ -10,7 +10,7 @@ const AGENT_POLL_INTERVAL = 10000 // 10s
 const GPU_POLL_INTERVAL = 30000 // 30s (REC-091)
 const MESSAGE_POLL_INTERVAL = 3000 // 3s (REC-080)
 const BUBBLE_DURATION = 20000 // 20s 气泡自动消失
-const STORAGE_KEY = 'openclaw_dashboard_agent_filter'
+// const STORAGE_KEY = 'openclaw_dashboard_agent_filter'  // reserved for future use
 
 // Types
 export type AgentStatus = 'running' | 'idle' | 'error' | 'aborted' | 'unknown'
@@ -50,6 +50,7 @@ export interface AgentInfo {
   status_api?: string
   emoji?: string
   historicalTokens?: number  // 从 byAgent 统计的历史总 token
+  details?: Record<string, unknown>  // raw agent details (optional)
 }
 
 export interface ModelUsage {
@@ -263,7 +264,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   // Helpers
   function normalizeAgent(item: Record<string, unknown>): AgentInfo {
-    if (!item || typeof item !== 'object') return { key: '', name: 'Unknown', status: 'unknown' }
+    if (!item || typeof item !== 'object') return { key: '', name: 'Unknown', status: 'unknown', lastActivity: 0 }
 
     const str = (v: unknown): string => (typeof v === 'string' ? v : '')
     const num = (v: unknown): number => (typeof v === 'number' ? v : 0)
@@ -799,75 +800,6 @@ export const useAgentStore = defineStore('agent', () => {
   async function checkNewMessages(): Promise<void> {
     console.log('[REC-082] checkNewMessages 开始，agents 数量:', agents.value.length)
 
-    // 提取消息内容的通用函数
-    function extractContent(msg: Record<string, unknown>): string {
-      if (typeof msg?.content === 'string') return msg.content as string
-      if (typeof msg?.content === 'object' && msg.content !== null && !Array.isArray(msg.content)) {
-        const c = msg.content as Record<string, unknown>
-        if (typeof c.text === 'string') return c.text
-      }
-      if (Array.isArray(msg?.content)) {
-        const items = msg.content as Array<Record<string, unknown>>
-        console.log(`[REC-085] content 数组 (${items.length} 项):`, items.map((x: Record<string, unknown>) => ({
-          type: x.type,
-          name: x.name,
-          input: x.input ? JSON.stringify(x.input).slice(0, 80) : null,
-          textLen: typeof x.text === 'string' ? x.text.length : 0,
-          thinkingLen: typeof x.thinking === 'string' ? x.thinking.length : 0,
-          contentItems: Array.isArray(x.content) ? (x.content as any[]).length : null,
-        })))
-        const parts = items.map(item => {
-          if (!item || typeof item !== 'object') return ''
-          const t = String(item.type ?? '')
-          if (t === 'text') return (item.text as string) ?? ''
-          if (t === 'thinking') return `💭 ${(item.thinking as string) ?? ''}`
-          if (t === 'tool_use') {
-            const name = String(item.name ?? '')
-            if (name) return `[🔧 ${name}]`
-            // 没有 name 时尝试从 input 提取信息
-            const input = item.input
-            if (typeof input === 'string' && input) return `[🔧 工具调用]`
-            if (typeof input === 'object' && input !== null) return `[🔧 工具调用]`
-            return ''
-          }
-          if (t === 'tool_result') {
-            const name = String(item.name ?? '')
-            const isError = item.is_error === true
-            // tool_result 的 content 可能是数组 [{type:'text', text:'...'}] 或纯字符串
-            const resultContent = item.content
-            if (isError) {
-              if (typeof item.error === 'string' && item.error)
-                return `[⚠️ ${name || '错误'}] ${item.error}`
-              if (typeof resultContent === 'string' && resultContent)
-                return `[⚠️ ${name || '错误'}] ${resultContent}`
-              if (Array.isArray(resultContent)) {
-                const textParts = resultContent
-                  .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
-                  .map((r: any) => r.text)
-                if (textParts.length > 0) return `[⚠️ ${name || '错误'}] ${textParts.join('\n')}`
-              }
-            }
-            if (Array.isArray(resultContent)) {
-              const textParts = resultContent
-                .filter((r: any) => r?.type === 'text' && typeof r.text === 'string')
-                .map((r: any) => r.text)
-              if (textParts.length > 0) {
-                return `[🔧 ${name || '结果'}] ${textParts.join('\n').slice(0, 200)}`
-              }
-            }
-            // 降级：直接取 text 字段
-            if (typeof item.text === 'string' && item.text) return `[🔧 ${name || '结果'}] ${item.text}`
-            if (name) return `[🔧 ${name}]`
-            return `[🔧 工具结果]`
-          }
-          return ''
-        }).filter(s => s && s !== '[tool_code]')
-        console.log(`[REC-085] 提取结果 (${parts.length} 部分):`, parts.map(p => p.slice(0, 80)))
-        return parts.join('\n')
-      }
-      return ''
-    }
-
     // 提取消息的各个 content part（不合并，每条独立返回），用于逐条显示气泡
     function extractContentParts(msg: Record<string, unknown>): { content: string; contentType: string; isError?: boolean }[] {
       if (typeof msg?.content === 'string') {
@@ -1006,7 +938,7 @@ export const useAgentStore = defineStore('agent', () => {
    */
   function getAgentBubbles(agentKey: string): MessageBubbleData[] {
     const arr = messageBubbles.value[agentKey]
-    return arr ? arr.map(e => ({ content: e.content, contentType: e.contentType, isError: e.isError })) : []
+    return arr ? arr.map(e => ({ content: e.content, contentType: e.contentType, isError: e.isError, timestamp: e.timestamp })) : []
   }
 
   /**

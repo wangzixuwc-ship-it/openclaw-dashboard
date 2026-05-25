@@ -301,11 +301,6 @@ function formatLocalTime(timeStr: string): string {
   }
 }
 
-function formatDescription(desc: string | undefined | null): string {
-  if (!desc || typeof desc !== 'string' || desc.trim() === '') return '-'
-  return desc.replace(/\n+/g, ' ').trim().substring(0, 80)
-}
-
 function formatDate(dateStr: string): string {
   if (!dateStr) return '-'
   try {

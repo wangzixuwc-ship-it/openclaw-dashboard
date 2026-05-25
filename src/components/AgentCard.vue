@@ -27,7 +27,6 @@
 
     <template #reference>
       <el-card
-        ref="cardRef"
         class="agent-card"
         shadow="hover"
         @click="openDrawer"
@@ -112,7 +111,6 @@
    <!-- 没有气泡时直接渲染卡片 -->
   <el-card
     v-else
-    ref="cardRef"
     class="agent-card"
     shadow="hover"
     @click="openDrawer"
@@ -287,7 +285,7 @@ function renderMessage(text: string): string {
   return DOMPurify.sanitize(html)
 }
 
-const renderedMessage = computed(() => renderMessage(props.latestMessage || ''))
+// renderedMessage removed — template now calls renderMessage(msg.content) directly
 
 function getBubbleClass(msg: BubbleMessage): string {
   const ct = msg.contentType ?? 'text'
@@ -303,7 +301,6 @@ function getBubbleClass(msg: BubbleMessage): string {
 // REC-080: 完全依赖 store 的 messageBubbles 状态（BUBBLE_DURATION = 20s）
 const hasBubbles = computed(() => !!(props.latestMessages && props.latestMessages.length > 0))
 const bubbleVisible = ref(hasBubbles.value)
-const cardRef = ref<HTMLElement>()
 
 watch(() => props.latestMessages, (newVal) => {
   bubbleVisible.value = !!(newVal && newVal.length > 0)
@@ -362,7 +359,7 @@ const statusDescription = computed(() => {
 })
 
 const durationText = computed(() => {
-  return store.formatDuration(props.agent.elapsedMs)
+  return store.formatDuration(props.agent.elapsedMs ?? 0)
 })
 
 const tokenPercent = computed(() => {
