@@ -207,11 +207,27 @@
                     @click="imageAttachments.splice(idx, 1)">×</el-button>
                 </div>
               </div>
+              <!-- #17 @ 提及下拉（@ Mention Dropdown）-->
+              <div v-if="mentionVisible" class="mention-dropdown">
+                <div
+                  v-for="(ag, idx) in mentionFiltered"
+                  :key="ag.id"
+                  class="mention-item"
+                  :class="{ active: mentionIndex === idx }"
+                  @mousedown.prevent="selectMention(ag)"
+                >
+                  <span class="mention-emoji">{{ ag.emoji || '🤖' }}</span>
+                  <span class="mention-name">{{ ag.name }}</span>
+                  <span class="mention-id">@{{ ag.id }}</span>
+                </div>
+                <div v-if="mentionFiltered.length === 0" class="mention-empty">无匹配 Agent</div>
+              </div>
               <div class="send-row">
                 <el-input v-model="chatInput" type="textarea" :rows="2"
                   ref="chatInputRef"
-                  placeholder="输入消息... (Enter 发送，Ctrl+Enter 换行，支持粘贴图片)" :disabled="sending"
-                  @keydown="handleInputKeydown" />
+                  placeholder="输入消息... (Enter 发送，@ 提及 Agent，Ctrl+Enter 换行，支持粘贴图片)" :disabled="sending"
+                  @keydown="handleInputKeydown"
+                  @input="handleChatInput" />
                 <el-button type="primary" :icon="Promotion" :loading="sending" :disabled="sending" @click="sendMessage">
                   发送
                 </el-button>
@@ -582,6 +598,71 @@ function applyTemplate(text: string) {
 const chatInput = ref('')
 const sending = ref(false)
 const msgContainerRef = ref<HTMLElement | null>(null)
+
+// ─── #17 @ 提及（@ Mention）功能 ──────────────────────────────────────────────
+const MENTION_AGENTS = [
+  { id: 'pm',        name: '项目经理',   emoji: '👩‍💼' },
+  { id: 'developer', name: '开发工程师',  emoji: '👨‍💻' },
+  { id: 'tester',    name: '测试工程师',  emoji: '🧪' },
+  { id: 'inspector', name: '巡检员',      emoji: '🔍' },
+  { id: 'archivist', name: '档案员',      emoji: '📚' },
+  { id: 'main',      name: '主控',        emoji: '🤖' },
+]
+
+const mentionVisible = ref(false)
+const mentionQuery = ref('')
+const mentionIndex = ref(0)
+const mentionStart = ref(-1) // @ 符号在字符串中的位置
+
+const mentionFiltered = computed(() => {
+  const q = mentionQuery.value.toLowerCase()
+  if (!q) return MENTION_AGENTS
+  return MENTION_AGENTS.filter(a =>
+    a.id.includes(q) || a.name.includes(q)
+  )
+})
+
+/** 输入框内容变化时，检测 @ 并更新 mention 状态 */
+function handleChatInput(): void {
+  const text = chatInput.value
+  // 找出光标位置（通过 textarea 的 selectionStart）
+  const ta = chatInputRef.value?.textarea || chatInputRef.value?.input
+  const pos = ta ? ta.selectionStart : text.length
+  // 向左找最近的 @ 符号
+  const before = text.slice(0, pos)
+  const atIdx = before.lastIndexOf('@')
+  if (atIdx === -1) {
+    mentionVisible.value = false
+    return
+  }
+  // @ 和光标之间不能有空格（空格=结束 mention）
+  const between = before.slice(atIdx + 1)
+  if (between.includes(' ') || between.includes('\n')) {
+    mentionVisible.value = false
+    return
+  }
+  mentionStart.value = atIdx
+  mentionQuery.value = between
+  mentionIndex.value = 0
+  mentionVisible.value = true
+}
+
+/** 选中 mention 选项，将 @query 替换为 @agentId */
+function selectMention(ag: { id: string; name: string; emoji: string }): void {
+  const text = chatInput.value
+  const insertText = `@${ag.id} `
+  // 替换 @query 部分
+  chatInput.value = text.slice(0, mentionStart.value) + insertText + text.slice(mentionStart.value + 1 + mentionQuery.value.length)
+  mentionVisible.value = false
+  nextTick(() => {
+    const ta = chatInputRef.value?.textarea || chatInputRef.value?.input
+    if (ta) {
+      const newPos = mentionStart.value + insertText.length
+      ta.setSelectionRange(newPos, newPos)
+      ta.focus()
+    }
+  })
+}
 
 // REC-036: 消息类型过滤
 const showThinking = ref(true)
@@ -1399,8 +1480,31 @@ function handlePaste(event: ClipboardEvent): void {
   }
 }
 
-/** 输入框按键处理：Enter 发送，Ctrl+Enter 换行 */
+/** 输入框按键处理：Enter 发送，Ctrl+Enter 换行，@ Mention 键盘导航 */
 function handleInputKeydown(e: KeyboardEvent): void {
+  // @ Mention 下拉（Mention Dropdown）键盘导航
+  if (mentionVisible.value && mentionFiltered.value.length > 0) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      mentionIndex.value = (mentionIndex.value + 1) % mentionFiltered.value.length
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      mentionIndex.value = (mentionIndex.value - 1 + mentionFiltered.value.length) % mentionFiltered.value.length
+      return
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      selectMention(mentionFiltered.value[mentionIndex.value])
+      return
+    }
+    if (e.key === 'Escape') {
+      mentionVisible.value = false
+      return
+    }
+  }
+
   if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
     e.preventDefault()
     sendMessage()
@@ -2877,5 +2981,55 @@ watch(recentMessages, () => {
   line-height: 1.55; white-space: pre-wrap;
   word-break: break-word;
   max-height: 200px; overflow-y: auto;
+}
+
+/* ─── #17 @ 提及下拉（@ Mention Dropdown）───────────────────────────────── */
+.mention-dropdown {
+  position: relative;
+  background: #1a2035;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.mention-item:hover,
+.mention-item.active {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.mention-emoji {
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.mention-name {
+  font-size: 13px;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.mention-id {
+  font-size: 11px;
+  color: #6366f1;
+  margin-left: auto;
+  font-family: monospace;
+}
+
+.mention-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #64748b;
+  text-align: center;
 }
 </style>
