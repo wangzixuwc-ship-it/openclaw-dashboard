@@ -99,16 +99,38 @@
 
     <template #footer>
       <div class="doctor-footer">
-        <el-button @click="dialogVisible = false">关闭</el-button>
-        <el-button
-          type="primary"
-          :icon="Refresh"
-          :loading="running"
-          :disabled="running"
-          @click="runDiagnosis"
-        >
-          {{ running ? `运行中 (${elapsedSec}s)` : '重新诊断' }}
-        </el-button>
+        <div class="doctor-fix-btns">
+          <el-tooltip content="重启 OpenClaw 网关进程（约 5-10 秒）" placement="top">
+            <el-button
+              size="small"
+              :icon="VideoPlay"
+              :loading="fixing === 'restart'"
+              :disabled="!!fixing"
+              @click="autoFix('restart-gateway')"
+            >重启网关</el-button>
+          </el-tooltip>
+          <el-tooltip content="删除残留的 .lock / .pid 文件（可解决网关无法启动问题）" placement="top">
+            <el-button
+              size="small"
+              :icon="Delete"
+              :loading="fixing === 'locks'"
+              :disabled="!!fixing"
+              @click="autoFix('clear-locks')"
+            >清理锁文件</el-button>
+          </el-tooltip>
+        </div>
+        <div class="doctor-footer-right">
+          <el-button @click="dialogVisible = false">关闭</el-button>
+          <el-button
+            type="primary"
+            :icon="Refresh"
+            :loading="running"
+            :disabled="running"
+            @click="runDiagnosis"
+          >
+            {{ running ? `运行中 (${elapsedSec}s)` : '重新诊断' }}
+          </el-button>
+        </div>
       </div>
     </template>
   </el-dialog>
@@ -127,6 +149,8 @@ import {
   Refresh,
   ArrowUp,
   ArrowDown,
+  VideoPlay,
+  Delete,
 } from '@element-plus/icons-vue'
 
 const props = withDefaults(defineProps<{
@@ -151,6 +175,35 @@ const errorDetail = ref<string>('')  // axios 真实错误
 const elapsedSec = ref(0)
 const showRaw = ref(false)  // 原始输出折叠状态
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
+
+// Sprint 8 #11: 自动修复
+const fixing = ref<string>('')  // 当前正在执行的修复操作名（空字符串=没在修复）
+
+async function autoFix(action: string) {
+  fixing.value = action === 'restart-gateway' ? 'restart' : 'locks'
+  try {
+    const resp = await fetch('/api/system/auto-fix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    })
+    const data = await resp.json()
+    if (resp.ok && data.ok) {
+      if (action === 'restart-gateway') {
+        ElMessage.success('网关重启指令已发送，约 5-10 秒后生效，建议点击"重新诊断"验证')
+      } else if (action === 'clear-locks') {
+        const n = data.removed?.length || 0
+        ElMessage.success(n > 0 ? `已清理 ${n} 个锁文件：${data.removed.map((p: string) => p.split('/').pop()).join(', ')}` : '未发现需要清理的锁文件')
+      }
+    } else {
+      ElMessage.error(`修复失败：${data.error || '未知错误'}`)
+    }
+  } catch (e: any) {
+    ElMessage.error('请求失败：' + e.message)
+  } finally {
+    fixing.value = ''
+  }
+}
 
 // ── 中文翻译解读：把 openclaw doctor 的英文输出转成可读中文条目 ──
 interface SummaryItem {
@@ -525,7 +578,16 @@ async function runDiagnosis(): Promise<void> {
 .dialog-footer,
 .doctor-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.doctor-fix-btns {
+  display: flex;
+  gap: 6px;
+}
+.doctor-footer-right {
+  display: flex;
   gap: 8px;
 }
 

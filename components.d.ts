@@ -11,9 +11,11 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    ActivityTimelineDialog: typeof import('./src/components/ActivityTimelineDialog.vue')['default']
     AgentCard: typeof import('./src/components/AgentCard.vue')['default']
     AgentDetailDrawer: typeof import('./src/components/AgentDetailDrawer.vue')['default']
     BillingConfigDialog: typeof import('./src/components/BillingConfigDialog.vue')['default']
+    CommandPaletteDialog: typeof import('./src/components/CommandPaletteDialog.vue')['default']
     CronCenterDialog: typeof import('./src/components/CronCenterDialog.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElBadge: typeof import('element-plus/es')['ElBadge']

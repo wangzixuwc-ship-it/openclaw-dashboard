@@ -6,11 +6,18 @@
     :close-on-click-modal="true"
     class="token-detail-dialog"
   >
-    <!-- 时段费用速览（Sprint 1）-->
+    <!-- 时段费用速览（Sprint 1 + Sprint 8 加"本周"）-->
     <div class="period-card" v-if="store.costSummary">
       <div class="period-item">
         <div class="period-label">今日</div>
         <div class="period-value">¥{{ store.costSummary.todayCNY.toFixed(2) }}</div>
+      </div>
+      <div class="period-item">
+        <div class="period-label">本周</div>
+        <div class="period-value">¥{{ thisWeekCost.toFixed(2) }}</div>
+        <div class="period-hint" v-if="weekOverWeek !== 0" :class="weekOverWeek > 0 ? 'hint-up' : 'hint-down'">
+          {{ weekOverWeek > 0 ? '▲' : '▼' }} 较上周 {{ Math.abs(weekOverWeek) }}%
+        </div>
       </div>
       <div class="period-item">
         <div class="period-label">本月已用</div>
@@ -38,11 +45,22 @@
       </div>
     </div>
 
+    <!-- Sprint 8: 时间范围切换 -->
+    <div class="chart-range-bar">
+      <button
+        v-for="opt in CHART_RANGES"
+        :key="opt.days"
+        class="range-btn"
+        :class="{ active: chartDays === opt.days }"
+        @click="setChartRange(opt.days)"
+      >{{ opt.label }}</button>
+    </div>
+
     <!-- 30天费用折线图（Sprint 6）-->
     <div class="section chart-section">
       <div class="section-title">
         <el-icon><TrendCharts /></el-icon>
-        近 30 天费用趋势
+        近 {{ chartDays }} 天费用趋势
         <span class="section-hint">按天聚合</span>
         <div class="chart-compare">
           <span class="compare-item" :class="weekOverWeek >= 0 ? 'up' : 'down'">
@@ -302,10 +320,30 @@ watch(visible, (val) => {
   }
 })
 
-// ── Sprint 6: 30 天费用时间线图表 ──
+// ── Sprint 6 + Sprint 8: 费用时间线图表 ──
 interface TimelineDay { date: string; tokens: number; cost: number }
 const chartLoading = ref(false)
 const timeline = ref<TimelineDay[]>([])
+
+// Sprint 8: 图表时间范围选择
+const CHART_RANGES = [
+  { days: 7,  label: '近7天' },
+  { days: 14, label: '近14天' },
+  { days: 30, label: '近30天' },
+]
+const chartDays = ref(30)
+
+function setChartRange(days: number) {
+  chartDays.value = days
+  fetchTimeline()
+}
+
+// Sprint 8: 本周费用（从 timeline 数据计算）
+const thisWeekCost = computed(() => {
+  const n = timeline.value.length
+  if (n === 0) return 0
+  return timeline.value.slice(Math.max(n - 7, 0)).reduce((s, d) => s + d.cost, 0)
+})
 
 // SVG 尺寸
 const SVG_W = 700
@@ -318,7 +356,7 @@ const PAD_B = 20
 async function fetchTimeline() {
   chartLoading.value = true
   try {
-    const res = await fetch('/api/cost-timeline?days=30')
+    const res = await fetch(`/api/cost-timeline?days=${chartDays.value}`)
     if (res.ok) {
       const data = await res.json()
       timeline.value = data.timeline || []
@@ -560,10 +598,32 @@ const filteredAgentModelRows = computed(() => {
   opacity: 0.75;
 }
 
-/* 时段费用速览卡（Sprint 1） */
+/* Sprint 8: 时间范围切换 */
+.chart-range-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.range-btn {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: rgba(255,255,255,0.45);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.range-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.range-btn.active { background: rgba(56,189,248,0.2); border-color: rgba(56,189,248,0.5); color: #38bdf8; }
+.hint-up { color: #f87171 !important; font-size: 10px; }
+.hint-down { color: #4ade80 !important; font-size: 10px; }
+
+/* 时段费用速览卡（Sprint 1 + Sprint 8 加本周列，5 列） */
 .period-card {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 10px;
   margin-bottom: 16px;
   padding: 14px;

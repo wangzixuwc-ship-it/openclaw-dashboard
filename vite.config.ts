@@ -102,7 +102,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
         },
         '/api/search': {
-          // 全局搜索 API（端口 31002, Sprint 7）
+          // 全局搜索 API（端口 31002, Sprint 7+8）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
+        '/api/skill-usage': {
+          // 技能调用排行榜（端口 31002, Sprint 8 #8）
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },

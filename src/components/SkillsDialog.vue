@@ -72,7 +72,58 @@
           <span>ClawHub</span>
         </template>
       </el-tab-pane>
+      <!-- Sprint 8 #8: 使用统计标签页 -->
+      <el-tab-pane name="usage">
+        <template #label>
+          <span>📊 使用统计</span>
+        </template>
+      </el-tab-pane>
     </el-tabs>
+
+    <!-- ══ Sprint 8 #8: 使用统计 tab ══ -->
+    <div v-if="activeTab === 'usage'" class="usage-section">
+      <div class="usage-header">
+        <span class="usage-title">工具调用排行榜（近 {{ usageDays }} 天）</span>
+        <div class="usage-range-btns">
+          <button v-for="d in [7, 30, 90]" :key="d"
+            class="usage-range-btn" :class="{ active: usageDays === d }"
+            @click="setUsageDays(d)">近{{ d }}天</button>
+        </div>
+        <el-button size="small" :loading="usageLoading" @click="fetchUsage" style="margin-left:8px">刷新</el-button>
+      </div>
+
+      <div v-if="usageLoading" class="usage-loading">
+        <el-icon class="is-loading" :size="20"><Loading /></el-icon>
+        <span>正在扫描 session 文件...</span>
+      </div>
+
+      <div v-else-if="usageRanked.length === 0" class="usage-empty">
+        <div>过去 {{ usageDays }} 天内没有工具调用记录</div>
+      </div>
+
+      <div v-else class="usage-list">
+        <div v-for="(item, idx) in usageRanked" :key="item.name" class="usage-row">
+          <span class="usage-rank">#{{ idx + 1 }}</span>
+          <span class="usage-name">{{ item.name }}</span>
+          <div class="usage-bar-wrap">
+            <div class="usage-bar" :style="{ width: (item.total / usageRanked[0].total * 100).toFixed(1) + '%', background: usageBarColor(idx) }"></div>
+          </div>
+          <span class="usage-count">{{ item.total.toLocaleString() }}</span>
+          <div class="usage-agents">
+            <el-tooltip
+              v-for="(cnt, agId) in item.byAgent" :key="agId"
+              :content="`${agId}: ${cnt} 次`"
+              placement="top"
+            >
+              <span class="usage-agent-dot" :style="{ background: agentDotColor(agId) }">{{ agentEmoji(agId) }}</span>
+            </el-tooltip>
+          </div>
+        </div>
+        <div class="usage-footer-note">
+          共 {{ usageTotalCalls.toLocaleString() }} 次工具调用 · 更新于 {{ usageUpdatedAt }}
+        </div>
+      </div>
+    </div>
 
     <!-- ══ 按 Agent tab ══ -->
     <div v-if="activeTab === 'byAgent' && skillsData" class="by-agent-section">
@@ -788,6 +839,49 @@ watch(() => props.visible, async (val) => {
   }
 })
 
+// ── Sprint 8 #8: 技能使用统计 ──────────────────────────────
+const usageLoading = ref(false)
+const usageDays = ref(30)
+const usageRanked = ref<{ name: string; total: number; byAgent: Record<string, number> }[]>([])
+const usageUpdatedAt = ref('')
+const usageTotalCalls = computed(() => usageRanked.value.reduce((s, r) => s + r.total, 0))
+
+const AGENT_DOT_COLORS: Record<string, string> = {
+  main: '#6366f1', pm: '#f59e0b', developer: '#22c55e',
+  tester: '#3b82f6', inspector: '#8b5cf6', archivist: '#ec4899',
+}
+function agentDotColor(id: string) { return AGENT_DOT_COLORS[id] || '#64748b' }
+
+function agentEmoji(id: string) {
+  const meta = agentsConfigured.value?.find((a: any) => a.id === id)
+  return meta?.emoji || '🤖'
+}
+
+const USAGE_BAR_COLORS = ['#6366f1','#f59e0b','#22c55e','#3b82f6','#8b5cf6','#ec4899','#38bdf8','#f97316','#84cc16','#06b6d4']
+function usageBarColor(idx: number) { return USAGE_BAR_COLORS[idx % USAGE_BAR_COLORS.length] }
+
+async function fetchUsage() {
+  usageLoading.value = true
+  try {
+    const resp = await fetch(`/api/skill-usage?days=${usageDays.value}&limit=30`)
+    if (resp.ok) {
+      const data = await resp.json()
+      usageRanked.value = data.ranked || []
+      usageUpdatedAt.value = data.generatedAt ? new Date(data.generatedAt).toLocaleTimeString('zh-CN') : ''
+    }
+  } catch { /* ignore */ } finally {
+    usageLoading.value = false
+  }
+}
+
+function setUsageDays(days: number) {
+  usageDays.value = days
+  fetchUsage()
+}
+
+// 切换到使用统计 tab 时自动拉取
+watch(activeTab, (tab) => { if (tab === 'usage') fetchUsage() })
+
 // ── API 调用 ──────────────────────────────────────────────
 async function fetchSkills(): Promise<void> {
   loading.value = true
@@ -1367,4 +1461,42 @@ function formatDate(dateStr: string): string {
 .compare-legend--top .compare-legend-text {
   white-space: nowrap;
 }
+
+/* ── Sprint 8 #8: 使用统计 ── */
+.usage-section { padding: 4px 0; }
+.usage-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.usage-title { font-size: 13px; color: var(--text-secondary); }
+.usage-range-btns { display: flex; gap: 4px; }
+.usage-range-btn {
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 5px; color: rgba(255,255,255,0.4); font-size: 11px;
+  padding: 2px 8px; cursor: pointer; transition: all 0.15s; font-family: inherit;
+}
+.usage-range-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.usage-range-btn.active { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.5); color: #a5b4fc; }
+.usage-loading { display: flex; align-items: center; gap: 8px; padding: 40px 0; color: var(--text-secondary); justify-content: center; }
+.usage-empty { padding: 40px 0; text-align: center; color: var(--text-secondary); font-size: 13px; }
+.usage-list { display: flex; flex-direction: column; gap: 6px; }
+.usage-row {
+  display: grid;
+  grid-template-columns: 28px 140px 1fr 60px 80px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+.usage-row:hover { background: rgba(255,255,255,0.04); }
+.usage-rank { font-size: 11px; color: rgba(255,255,255,0.3); text-align: right; font-variant-numeric: tabular-nums; }
+.usage-name { font-size: 13px; color: var(--text-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-bar-wrap { background: rgba(255,255,255,0.06); border-radius: 3px; height: 6px; overflow: hidden; }
+.usage-bar { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.usage-count { font-size: 12px; color: rgba(255,255,255,0.5); text-align: right; font-variant-numeric: tabular-nums; }
+.usage-agents { display: flex; gap: 3px; flex-wrap: wrap; }
+.usage-agent-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%; font-size: 11px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.usage-footer-note { font-size: 11px; color: rgba(255,255,255,0.2); margin-top: 10px; text-align: center; }
 </style>

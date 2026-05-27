@@ -92,6 +92,26 @@
                 </div>
               </div>
 
+              <!-- Docs section (#9: 文档文件搜索结果) -->
+              <div v-if="docResults.length" class="palette-section">
+                <div class="palette-section-title">文档文件</div>
+                <div
+                  v-for="(doc, i) in docResults"
+                  :key="doc.path"
+                  class="palette-item palette-msg-item"
+                  :class="{ active: flatIndex(matchedActions.length + agentResults.length + messageResults.length, i) === activeIdx }"
+                  @click="selectDoc(doc)"
+                  @mouseenter="activeIdx = flatIndex(matchedActions.length + agentResults.length + messageResults.length, i)"
+                >
+                  <span class="palette-item-icon">📄</span>
+                  <div class="palette-item-text">
+                    <span class="palette-item-label">{{ doc.title }}</span>
+                    <span class="palette-item-snippet" v-html="doc.snippet" />
+                  </div>
+                  <span class="palette-item-ts">{{ docShortPath(doc.path) }}</span>
+                </div>
+              </div>
+
               <!-- No results -->
               <div v-if="!loading && query && allItems.length === 0" class="palette-no-result">
                 <el-icon><Search /></el-icon>
@@ -150,6 +170,7 @@ const resultsRef = ref<HTMLElement | null>(null)
 
 const agentResults = ref<any[]>([])
 const messageResults = ref<any[]>([])
+const docResults = ref<any[]>([])
 
 const indexStatus = ref({ totalMessages: 0, totalFiles: 0, lastIndexedAt: null as string | null })
 
@@ -163,6 +184,7 @@ const allItems = computed(() => [
   ...matchedActions.value,
   ...agentResults.value,
   ...messageResults.value,
+  ...docResults.value,
 ])
 
 function flatIndex(sectionOffset: number, i: number) {
@@ -175,6 +197,7 @@ function onInput() {
   activeIdx.value = 0
   agentResults.value = []
   messageResults.value = []
+  docResults.value = []
   if (debounceTimer) clearTimeout(debounceTimer)
   if (!query.value.trim()) return
   debounceTimer = setTimeout(doSearch, 300)
@@ -189,6 +212,7 @@ async function doSearch() {
       const data = await resp.json()
       agentResults.value = data.results?.agents || []
       messageResults.value = data.results?.messages || []
+      docResults.value = data.results?.docs || []
     }
   } catch { /* network error */ } finally {
     loading.value = false
@@ -237,9 +261,23 @@ function activateItem() {
   const ai = activeIdx.value
   const aLen = matchedActions.value.length
   const agLen = agentResults.value.length
+  const msgLen = messageResults.value.length
   if (ai < aLen) selectAction(matchedActions.value[ai])
   else if (ai < aLen + agLen) selectAgent(agentResults.value[ai - aLen])
-  else selectMessage(messageResults.value[ai - aLen - agLen])
+  else if (ai < aLen + agLen + msgLen) selectMessage(messageResults.value[ai - aLen - agLen])
+  else selectDoc(docResults.value[ai - aLen - agLen - msgLen])
+}
+
+function selectDoc(doc: any) {
+  close()
+  // 用文件管理器打开（如果实现了），否则复制路径
+  const home = doc.path?.replace(/^\/Users\/[^/]+/, '~') || doc.path
+  window.navigator.clipboard?.writeText(doc.path).catch(() => {})
+  ElMessage.success({ message: `路径已复制：${home}`, duration: 2500 })
+}
+
+function docShortPath(p: string) {
+  return (p || '').replace(/^\/Users\/[^/]+\/clawd\//, '~/clawd/').replace('/clawd/', '~/clawd/')
 }
 
 function selectAction(act: typeof ACTIONS[0]) {

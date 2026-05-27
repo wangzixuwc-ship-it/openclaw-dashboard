@@ -62,6 +62,24 @@ function getSearchDb() {
         message_count INTEGER DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+      -- #9: 文档文件索引（.md 文件，管理目录 + agent 目录）
+      CREATE TABLE IF NOT EXISTS docs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        mtime_ms INTEGER NOT NULL
+      );
+      CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
+        content, title UNINDEXED, path UNINDEXED,
+        content='docs', content_rowid='id'
+      );
+      CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON docs BEGIN
+        INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON docs BEGIN
+        INSERT INTO docs_fts(docs_fts, rowid, content) VALUES ('delete', old.id, old.content);
+      END;
     `)
     return _searchDb
   } catch (e) {
@@ -69,6 +87,117 @@ function getSearchDb() {
     _searchDb = null
     return null
   }
+}
+
+// #9: 索引 .md 文档文件
+function indexDocFiles() {
+  const db = getSearchDb()
+  if (!db) return { error: 'SQLite unavailable' }
+
+  const home = os.homedir()
+  // 搜索范围：~/clawd/ 顶层 .md + ~/clawd/admin/**/*.md + ~/clawd/memory/**/*.md + ~/clawd/agents/**/*.md
+  const searchDirs = [
+    { dir: path.join(home, 'clawd'), depth: 1 },
+    { dir: path.join(home, 'clawd', 'admin'), depth: 2 },
+    { dir: path.join(home, 'clawd', 'memory'), depth: 2 },
+    { dir: path.join(home, 'clawd', 'agents'), depth: 3 },
+  ]
+
+  function collectMdFiles(dir, maxDepth, curDepth = 0) {
+    const files = []
+    try {
+      for (const entry of fsSync.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name)
+        if (entry.isFile() && entry.name.endsWith('.md')) files.push(fullPath)
+        else if (entry.isDirectory() && curDepth < maxDepth) files.push(...collectMdFiles(fullPath, maxDepth, curDepth + 1))
+      }
+    } catch { /* 目录不存在忽略 */ }
+    return files
+  }
+
+  const getDoc = db.prepare('SELECT mtime_ms FROM docs WHERE path = ?')
+  const upsertDoc = db.prepare('INSERT OR REPLACE INTO docs (path, title, content, mtime_ms) VALUES (?, ?, ?, ?)')
+  const deleteDoc = db.prepare('DELETE FROM docs WHERE path = ?')
+
+  let added = 0, updated = 0, skipped = 0
+
+  for (const { dir, depth } of searchDirs) {
+    for (const filePath of collectMdFiles(dir, depth)) {
+      try {
+        const stat = fsSync.statSync(filePath)
+        const mtime = Math.round(stat.mtimeMs)
+        const existing = getDoc.get(filePath)
+        if (existing && existing.mtime_ms === mtime) { skipped++; continue }
+
+        const raw = fsSync.readFileSync(filePath, 'utf8')
+        const title = path.basename(filePath, '.md')
+        const content = raw.slice(0, 8000) // 限制每个文件最多 8000 字符
+
+        if (existing) { deleteDoc.run(filePath) }
+        upsertDoc.run(filePath, title, content, mtime)
+        if (existing) updated++; else added++
+      } catch { /* 读取失败忽略 */ }
+    }
+  }
+
+  db.prepare("INSERT OR REPLACE INTO meta VALUES ('docs_indexed_at', ?)").run(new Date().toISOString())
+  const total = db.prepare('SELECT COUNT(*) as n FROM docs').get()
+  return { added, updated, skipped, totalDocs: total?.n || 0 }
+}
+
+// #8: 技能调用统计（扫 session .jsonl 里的 tool_use 事件，内存缓存 30 分钟）
+let _toolCallCache = null
+let _toolCallCacheTime = 0
+const TOOL_CALL_TTL = 30 * 60 * 1000 // 30 分钟
+
+function buildToolCallStats(days = 30) {
+  const now = Date.now()
+  if (_toolCallCache && now - _toolCallCacheTime < TOOL_CALL_TTL) return _toolCallCache
+
+  const since = now - days * 86400000
+  const counts = {} // { toolName: { total: N, byAgent: { agentId: N } } }
+
+  try {
+    for (const agentId of fsSync.readdirSync(AGENTS_DIR)) {
+      const sessDir = path.join(AGENTS_DIR, agentId, 'sessions')
+      let files
+      try { files = fsSync.readdirSync(sessDir) } catch { continue }
+
+      for (const f of files) {
+        if (!f.endsWith('.jsonl') || f.includes('.trajectory') || f.includes('.bak') || f.includes('.tmp')) continue
+        const filePath = path.join(sessDir, f)
+        try {
+          const stat = fsSync.statSync(filePath)
+          if (stat.mtimeMs < since) continue // 跳过超出时间范围的旧文件
+          const lines = fsSync.readFileSync(filePath, 'utf8').split('\n')
+          for (const line of lines) {
+            if (!line.trim()) continue
+            let d
+            try { d = JSON.parse(line) } catch { continue }
+            if (d.type !== 'message' || d.message?.role !== 'assistant') continue
+            const content = d.message?.content
+            if (!Array.isArray(content)) continue
+            for (const c of content) {
+              // OpenClaw session 格式：type='toolCall'（不是 'tool_use'）
+              const isToolCall = c?.type === 'toolCall' || c?.type === 'tool_use'
+              if (!isToolCall || !c.name) continue
+              if (!counts[c.name]) counts[c.name] = { total: 0, byAgent: {} }
+              counts[c.name].total++
+              counts[c.name].byAgent[agentId] = (counts[c.name].byAgent[agentId] || 0) + 1
+            }
+          }
+        } catch { }
+      }
+    }
+  } catch { }
+
+  const ranked = Object.entries(counts)
+    .map(([name, data]) => ({ name, total: data.total, byAgent: data.byAgent }))
+    .sort((a, b) => b.total - a.total)
+
+  _toolCallCache = { ranked, generatedAt: now, days }
+  _toolCallCacheTime = now
+  return _toolCallCache
 }
 
 function doIndexMessages(opts = {}) {
@@ -3596,12 +3725,11 @@ const server = http.createServer(async (req, res) => {
         } catch { /* ignore */ }
       }
 
-      // FTS message search
+      // FTS 对话历史搜索
       if (type === 'all' || type === 'messages') {
         try {
           const db = getSearchDb()
           if (db) {
-            // Escape FTS5 special chars, add prefix wildcard for partial match
             const ftsQ = q.replace(/["'*^()]/g, ' ').trim().split(/\s+/).filter(Boolean).map(w => `"${w}"*`).join(' ')
             if (ftsQ) {
               const rows = db.prepare(`
@@ -3622,7 +3750,32 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      const total = results.agents.length + results.messages.length
+      // #9: 文档文件搜索（.md 文件：admin/ + memory/ + agent 目录）
+      results.docs = []
+      if (type === 'all' || type === 'docs') {
+        try {
+          const db = getSearchDb()
+          if (db) {
+            const ftsQ = q.replace(/["'*^()]/g, ' ').trim().split(/\s+/).filter(Boolean).map(w => `"${w}"*`).join(' ')
+            if (ftsQ) {
+              const rows = db.prepare(`
+                SELECT d.path, d.title,
+                  snippet(docs_fts, 0, '<mark>', '</mark>', '…', 20) AS snippet
+                FROM docs_fts
+                JOIN docs d ON d.id = docs_fts.rowid
+                WHERE docs_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+              `).all(ftsQ, Math.min(limit, 10))
+              results.docs = rows
+            }
+          }
+        } catch (e) {
+          console.warn('[search] docs FTS error:', e.message)
+        }
+      }
+
+      const total = results.agents.length + results.messages.length + (results.docs?.length || 0)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ results, q, total }))
     } catch (e) {
@@ -3643,8 +3796,10 @@ const server = http.createServer(async (req, res) => {
         const opts = body ? JSON.parse(body) : {}
         console.log('[search-index] build start, rebuild=', !!opts.rebuild)
         const result = doIndexMessages({ rebuild: !!opts.rebuild })
+        // 同时索引 .md 文档文件（#9）
+        const docResult = indexDocFiles()
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, ...result }))
+        res.end(JSON.stringify({ ok: true, ...result, docs: docResult }))
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: e.message }))
@@ -3737,6 +3892,73 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(500, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: e.message }))
     }
+    return
+  }
+
+  // ============================================
+  // Sprint 8: GET /api/skill-usage — 技能调用排行榜（#8）
+  // ============================================
+  if (pathname === '/api/skill-usage' && req.method === 'GET') {
+    try {
+      const days = Math.min(parseInt(url.searchParams.get('days') || '30'), 365)
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '30'), 100)
+      const data = buildToolCallStats(days)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ...data, ranked: data.ranked.slice(0, limit) }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
+  // ============================================
+  // Sprint 8: POST /api/system/auto-fix — 网关自动修复（#11）
+  // ============================================
+  if (pathname === '/api/system/auto-fix' && req.method === 'POST') {
+    let body = ''
+    req.on('data', d => body += d)
+    req.on('end', async () => {
+      try {
+        const { action } = body ? JSON.parse(body) : {}
+        if (!action) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'action required' })); return }
+
+        if (action === 'restart-gateway') {
+          // 重启 OpenClaw 网关
+          const { exec } = await import('child_process')
+          exec('openclaw gateway restart', { timeout: 30000 }, (err, stdout, stderr) => {
+            if (err) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: err.message, stderr })) }
+            else { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true, stdout: stdout.trim(), action })) }
+          })
+          return
+        }
+
+        if (action === 'clear-locks') {
+          // 清理 .lock 文件（OpenClaw 运行目录）
+          const lockDirs = [OPENCLAW_DIR, path.join(os.homedir(), 'clawd')]
+          let removed = []
+          for (const dir of lockDirs) {
+            try {
+              for (const f of fsSync.readdirSync(dir)) {
+                if (f.endsWith('.lock') || f.endsWith('.pid')) {
+                  const p = path.join(dir, f)
+                  try { fsSync.unlinkSync(p); removed.push(p) } catch { }
+                }
+              }
+            } catch { }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, removed, action }))
+          return
+        }
+
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: `unknown action: ${action}` }))
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: e.message }))
+      }
+    })
     return
   }
 
