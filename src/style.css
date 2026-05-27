@@ -260,3 +260,161 @@ body {
   border-color: var(--border-color) !important;
   color: var(--text-primary) !important;
 }
+
+/* ============================================================
+   亮色主题（Light Theme）— 在 <html> 添加 .light-theme class 激活
+   ============================================================ */
+
+html.light-theme {
+  /* 背景色系 */
+  --bg-primary:    #f0f4f8;        /* 浅灰蓝主背景 */
+  --bg-secondary:  #e8edf2;        /* 次级背景 */
+  --bg-card:       #ffffff;        /* 卡片白色 */
+  --bg-elevated:   #eef2f7;        /* 浮层背景 */
+  --bg-card-hover: #f5f8fc;        /* 卡片悬停 */
+
+  /* 文字色系 */
+  --text-primary:   #0f172a;       /* 主文本：深色 */
+  --text-secondary: #475569;       /* 次文本：中灰 */
+  --text-muted:     #94a3b8;       /* 弱化文本 */
+
+  /* 边框 */
+  --border-color: #dde3ec;         /* 浅边框 */
+
+  /* 强调色（亮色背景上用深蓝）*/
+  --accent:      #0284c7;
+  --accent-glow: rgba(2, 132, 199, 0.1);
+}
+
+/* 亮色主题：body / #app */
+html.light-theme body,
+html.light-theme #app {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* 亮色主题：Element Plus 组件覆写 */
+html.light-theme .el-card {
+  --el-card-bg-color:     var(--bg-card)    !important;
+  --el-card-border-color: var(--border-color) !important;
+  background-color: var(--bg-card) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06) !important;
+}
+
+html.light-theme .el-input__wrapper {
+  background-color: var(--bg-card) !important;
+  box-shadow: 0 0 0 1px var(--border-color) inset !important;
+}
+
+html.light-theme .el-input__inner {
+  color: var(--text-primary) !important;
+}
+
+html.light-theme .el-button--default {
+  --el-button-bg-color:           var(--bg-card)      !important;
+  --el-button-text-color:         var(--text-primary)  !important;
+  --el-button-border-color:       var(--border-color)  !important;
+  --el-button-hover-text-color:   var(--accent)        !important;
+  --el-button-hover-bg-color:     var(--bg-elevated)   !important;
+  --el-button-hover-border-color: var(--accent)        !important;
+}
+
+html.light-theme .el-drawer {
+  background-color: var(--bg-card) !important;
+}
+
+html.light-theme .el-drawer__header {
+  color: var(--text-primary) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+html.light-theme .el-dialog {
+  background-color: var(--bg-card) !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12) !important;
+}
+
+html.light-theme .el-dialog__header {
+  background-color: var(--bg-card) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+html.light-theme .el-dialog__title {
+  color: var(--text-primary) !important;
+}
+
+html.light-theme .el-dialog__body {
+  background-color: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+}
+
+html.light-theme .el-dialog__close {
+  color: var(--text-secondary) !important;
+}
+
+html.light-theme .el-tag {
+  --el-tag-bg-color:     rgba(2, 132, 199, 0.08)  !important;
+  --el-tag-border-color: rgba(2, 132, 199, 0.2)   !important;
+  --el-tag-text-color:   var(--accent)             !important;
+}
+
+html.light-theme .el-table {
+  --el-table-bg-color:          var(--bg-card)     !important;
+  --el-table-tr-bg-color:       var(--bg-card)     !important;
+  --el-table-header-bg-color:   var(--bg-elevated) !important;
+  --el-table-border-color:      var(--border-color)!important;
+  --el-table-text-color:        var(--text-primary) !important;
+  --el-table-header-text-color: var(--text-secondary) !important;
+}
+
+html.light-theme .el-select__wrapper {
+  background-color: var(--bg-card) !important;
+  box-shadow: 0 0 0 1px var(--border-color) inset !important;
+}
+
+html.light-theme .el-popper {
+  background-color: var(--bg-card) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
+}
+
+html.light-theme .el-popper__arrow::before {
+  background-color: var(--bg-card) !important;
+  border-color: var(--border-color) !important;
+}
+
+html.light-theme .el-message {
+  background-color: var(--bg-card) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+html.light-theme .el-notification {
+  background-color: var(--bg-card) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+html.light-theme .el-alert {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-color) !important;
+}
+
+html.light-theme .el-switch__core {
+  background-color: var(--border-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+html.light-theme ::-webkit-scrollbar-track {
+  background: var(--bg-elevated);
+}
+
+html.light-theme ::-webkit-scrollbar-thumb {
+  background: #c8d0dc;
+}
+
+html.light-theme ::-webkit-scrollbar-thumb:hover {
+  background: #a8b3c2;
+}

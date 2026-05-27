@@ -91,6 +91,14 @@
             </button>
           </el-tooltip>
 
+          <!-- Sprint 9: #18 主题切换（Dark/Light Theme Toggle）-->
+          <el-tooltip :content="isDark ? '切换亮色主题' : '切换暗色主题'" placement="bottom">
+            <button class="top-indicator top-indicator-theme" @click="toggleTheme">
+              <span class="theme-icon">{{ isDark ? '☀️' : '🌙' }}</span>
+              <span class="top-ind-label">{{ isDark ? '亮色' : '暗色' }}</span>
+            </button>
+          </el-tooltip>
+
           <!-- 自定义布局 -->
           <el-tooltip content="自定义布局：排序功能按钮 / 统计卡片" placement="bottom">
             <button class="top-layout-btn" @click="layoutDialogVisible = true">
@@ -466,6 +474,7 @@ import CommandPaletteDialog from '../components/CommandPaletteDialog.vue'
 import ActivityTimelineDialog from '../components/ActivityTimelineDialog.vue'
 import QuickMsgFab from '../components/QuickMsgFab.vue'
 import { useLayoutSettings } from '../composables/useLayoutSettings'
+import { useTheme } from '../composables/useTheme'
 import { type WorkflowData } from '../data/workflow-steps'
 import {
   Monitor,
@@ -590,6 +599,9 @@ const cronCenterVisible = ref(false)
 // Sprint 7: 命令面板 + 活动时间线
 const commandPaletteVisible = ref(false)
 const activityTimelineVisible = ref(false)
+
+// Sprint 9: #18 主题切换（Dark/Light Theme Toggle）
+const { isDark, toggleTheme } = useTheme()
 
 function statusBarOrder(id: string): number {
   const idx = layoutConfig.value.statusBar.indexOf(id)
@@ -984,6 +996,11 @@ onUnmounted(() => {
 .top-indicator-timeline { border-color: rgba(34,197,94,0.2); background: rgba(34,197,94,0.04); }
 .top-indicator-timeline .el-icon { color: #4ade80; }
 .top-indicator-timeline:hover { border-color: rgba(34,197,94,0.5); background: rgba(34,197,94,0.12); }
+
+/* #18 主题切换按钮（Dark/Light Theme Toggle Button）*/
+.top-indicator-theme { border-color: rgba(251,191,36,0.2); background: rgba(251,191,36,0.04); }
+.top-indicator-theme .theme-icon { font-size: 13px; line-height: 1; }
+.top-indicator-theme:hover { border-color: rgba(251,191,36,0.5); background: rgba(251,191,36,0.12); }
 
 /* 自定义布局按钮 */
 .top-layout-btn {
