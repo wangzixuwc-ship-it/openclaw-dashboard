@@ -58,16 +58,23 @@ export interface DoctorResult {
   error?: string
 }
 
-export async function runDoctor(): Promise<DoctorResult | null> {
+export async function runDoctor(): Promise<DoctorResult> {
+  // 诊断命令本身约 30 秒，超时设 180s 留余量
+  const url = import.meta.env.DEV
+    ? '/api/system/doctor'
+    : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31002'}/api/system/doctor`
   try {
-    const url = import.meta.env.DEV
-      ? '/api/system/doctor'
-      : `${import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:31002'}/api/system/doctor`
-    const resp = await axios.post(url, {}, { timeout: 120000 })
+    const resp = await axios.post(url, {}, { timeout: 180000 })
     return resp.data as DoctorResult
-  } catch (e: unknown) {
+  } catch (e: any) {
     console.error('[System] runDoctor error:', e)
-    return null
+    // 把真实错误信息抛出去，让 UI 显示原因（而不是吞掉返回 null）
+    const detail = e?.code === 'ECONNABORTED'
+      ? `请求超时（>180秒）：openclaw doctor 命令执行时间过长`
+      : e?.response
+        ? `后端返回 HTTP ${e.response.status}: ${JSON.stringify(e.response.data || {}).slice(0, 200)}`
+        : e?.message || String(e)
+    throw new Error(detail)
   }
 }
 

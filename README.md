@@ -4,7 +4,7 @@
 
 **OpenClaw 可视化监控工作台** — 实时掌控所有 AI Agent 的运行状态、对话历史、技能配置与资源消耗
 
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://gitee.com/yaconit/openclaw-dashboard/releases)
+[![Version](https://img.shields.io/badge/version-1.8.2-blue.svg)](https://gitee.com/yaconit/openclaw-dashboard/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Vue](https://img.shields.io/badge/Vue-3.x-4FC08D.svg)](https://vuejs.org/)
 [![Element Plus](https://img.shields.io/badge/Element%20Plus-2.x-409EFF.svg)](https://element-plus.org/)
@@ -283,6 +283,19 @@ cat ~/.openclaw/openclaw.json | grep token
 
 | 版本 | 说明 |
 |------|------|
+| v1.8.2 | 功能按钮区下移并放大：原顶部 7 个小按钮（网关/文件管理/计费配置/技能库/WebUI/通知/GPU/版本）下移到统计卡下方新增「功能区」，每个按钮带图标+主标题+副标题，显著放大；顶部状态栏简化为「品牌+时间+自定义布局」；自定义排序逻辑完全保留 |
+| v1.8.1 | ① Token 详情「累计」改为「历史至今」并加 tooltip 说明（修改计费配置后实时按新单价重算所有历史用量）  ② 新增「自定义布局」对话框：顶部按钮顺序 + 统计卡片顺序均可拖拽/点击 ↑↓ 重排，配置持久化到 localStorage |
+| v1.8.0 | Sprint 1 暖身打包（5 项）：① 通知中心铃铛+错误推送  ② Dashboard 顶部「今日/本月预估」副标题  ③ Token 详情顶部时段费用速览卡  ④ Agent 卡片双击进会话+自动聚焦输入  ⑤ 「正在做什么」气泡可切换显示完整 thinking 原文 |
+| v1.7.1 | 文件管理增强：① 类别 / 分组标题可点击折叠 + 显示文件数  ② 每个文件 hover 时显示快捷按钮：在 Finder 中显示 / 用默认应用打开  ③ 右侧预览面板加打开按钮 |
+| v1.7.0 | 新增「文件管理」模块：分类列出 ~/clawd 和 ~/.openclaw 所有关键文件，含中文译名、说明、谁在用、实时大小/修改时间；右侧预览（Markdown 渲染、JSON 格式化、敏感文件提示、目录列表）；左侧搜索 |
+| v1.6.3 | 网关诊断结果中文解读：把英文输出（Doctor warnings / plugins.allow / symlink-escape / Missing requirements 等）翻译成中文条目卡片，原始英文输出折叠隐藏，可点击展开 |
+| v1.6.2 | 网关诊断弹窗修复：超时 120s→180s、显示已运行秒数、暴露真实错误原因、新增「重新诊断」按钮、不再吞掉 axios 错误 |
+| v1.6.1 | 计费配置只显示当前实际使用过的模型；订阅新模型并产生 token 用量后自动出现；Token 消耗详情表加 Agent 真实头像图片 |
+| v1.6.0 | 按模型可编辑计费配置（顶部「计费配置」按钮）：支持包月订阅 / 按 token / 时段折扣 / 缓存价；内置 MiniMax 包月、DeepSeek 夜间半价、Claude、OpenAI 预设；配置持久化到 `billing-config.json` |
+| v1.5.0 | 新增三种计费模式（electricity / subscription / api_only），支持订阅 API 月费按运行时长分摊；Token 详情筛选下拉 z-index 修复（el-dialog 内可正常弹出） |
+| v1.4.2 | Token 消耗详情：各 Agent 明细表 Agent / 模型 列可筛选、Token / 费用 列可排序 |
+| v1.4.1 | 技能对比矩阵图例移到顶部固定显示（绿点 / 橙点 / 灰点含义一目了然） |
+| v1.4.0 | 右侧面板整体滚动（el-scrollbar 重构）、操作按钮固定底部不参与滚动、抽屉头像、技能分类点击折叠、Agent 列表去重、消息发送 API 重构（本地 CLI 代理替代 sessions_send）、心跳与英文思考内容自动过滤、修复运行中卡片无法点击的 Bug |
 | v1.3.0 | 实时活动条与抽屉活动面板、技能对比矩阵、定时任务面板、Button 全面升级、上下文进度条覆盖所有 Agent |
 | v1.2.x | 技能库内联面板、技能详情点击展开、运行状态检测优化 |
 | v1.1.x | 多 Agent 头像支持、历史 Token 按模型拆分、费用统计 |
@@ -308,6 +321,4 @@ cat ~/.openclaw/openclaw.json | grep token
 
 ---
 
-## 📬 联系作者
-
-![微信](wechat.jpg)
+> 基于 [openclaw-dashboard](https://gitee.com/yaconit/openclaw-dashboard) 二次开发，感谢原作者的工作。

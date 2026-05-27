@@ -12,51 +12,75 @@
           <span class="brand-time">{{ currentTime }}</span>
         </div>
 
-        <div class="status-indicators">
-          <!-- 视图切换 (removed REC-067: project monitor removed) -->
-
-          <!-- Gateway Version -->
-          <el-tooltip content="切换版本" placement="bottom">
-            <div class="indicator indicator-version" @click="versionDialogVisible = true" style="cursor: pointer;">
-              <span class="indicator-label">OpenClaw</span>
-              <span class="indicator-value">{{ store.gatewayVersion || '未知' }}</span>
-            </div>
+        <!-- 顶部右侧：版本 + 网关 + 通知 + 自定义布局 -->
+        <div class="status-top-right">
+          <!-- 版本 -->
+          <el-tooltip content="点击切换 OpenClaw 版本" placement="bottom">
+            <button class="top-indicator top-indicator-version" @click="versionDialogVisible = true">
+              <el-icon :size="13"><Box /></el-icon>
+              <span class="top-ind-label">OpenClaw 版本</span>
+              <span class="top-ind-value mono">{{ store.gatewayVersion || '未知' }}</span>
+            </button>
           </el-tooltip>
 
-          <!-- Gateway Health (REC-004: 布局合并，保持原有样式) -->
-          <el-tooltip content="诊断网关" placement="bottom">
-            <div class="indicator" :class="healthClass" @click="doctorDialogVisible = true">
-              <el-icon :size="14"><component :is="healthIcon" /></el-icon>
-              <span class="indicator-label">网关</span>
-              <span>{{ healthDisplay }}</span>
-              <span v-if="store.healthStatus === 'unhealthy'"> 点击诊断</span>
-            </div>
+          <!-- 网关健康 -->
+          <el-tooltip content="点击诊断网关问题" placement="bottom">
+            <button class="top-indicator" :class="`top-indicator-${store.healthStatus}`" @click="doctorDialogVisible = true">
+              <el-icon :size="13"><component :is="healthIcon" /></el-icon>
+              <span class="top-ind-label">网关</span>
+              <span class="top-ind-value">{{ healthDisplay }}</span>
+            </button>
           </el-tooltip>
 
-          <!-- GPU VRAM Usage (REC-091) -->
-          <el-tooltip
-            v-if="store.gpuVramPercentage !== null && store.gpuVramPercentage !== undefined"
-            :content="`${store.gpuVramUsedMb} / ${store.gpuVramTotalMb} MB`"
-            placement="bottom"
-            class="gpu-tooltip"
-          >
-            <div class="indicator indicator-gpu">
-              <el-icon :size="14"><Monitor /></el-icon>
-              <span class="indicator-label">显存</span>
-              <span class="indicator-value">{{ store.gpuVramPercentage }}%</span>
-            </div>
-          </el-tooltip>
+          <!-- 通知中心 -->
+          <el-popover placement="bottom-end" :width="360" trigger="click" popper-class="notif-popper">
+            <template #reference>
+              <button class="top-indicator top-indicator-notif" :class="{ 'has-unread': store.unreadNotifications > 0 }">
+                <el-icon :size="13"><Bell /></el-icon>
+                <span class="top-ind-label">通知中心</span>
+                <span class="top-ind-value">{{ store.unreadNotifications > 0 ? `${store.unreadNotifications} 条未读` : '无新通知' }}</span>
+                <span v-if="store.unreadNotifications > 0" class="top-notif-badge">{{ store.unreadNotifications > 9 ? '9+' : store.unreadNotifications }}</span>
+              </button>
+            </template>
+            <template #default>
+              <div class="notif-panel">
+                <div class="notif-header">
+                  <span>通知中心</span>
+                  <div class="notif-actions">
+                    <el-button link size="small" @click="store.markAllNotificationsRead()" :disabled="store.unreadNotifications === 0">全部已读</el-button>
+                    <el-button link size="small" type="danger" @click="store.clearNotifications()" :disabled="store.notifications.length === 0">清空</el-button>
+                  </div>
+                </div>
+                <div v-if="store.notifications.length === 0" class="notif-empty">
+                  <el-icon><BellFilled /></el-icon>
+                  暂无通知
+                </div>
+                <div v-else class="notif-list">
+                  <div
+                    v-for="n in store.notifications"
+                    :key="n.id"
+                    class="notif-item"
+                    :class="[`notif-${n.type}`, { unread: !n.read }]"
+                  >
+                    <span class="notif-icon">{{ n.type === 'error' ? '🔴' : n.type === 'aborted' ? '⚪' : 'ℹ️' }}</span>
+                    <div class="notif-body">
+                      <div class="notif-agent">{{ n.agentName }}</div>
+                      <div class="notif-msg">{{ n.message }}</div>
+                      <div class="notif-time">{{ formatNotifTime(n.timestamp) }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </el-popover>
 
-          <!-- Skills Button -->
-          <div class="indicator indicator-action" @click="skillsDialogVisible = true">
-            <el-icon :size="14"><Briefcase /></el-icon>
-            <span class="indicator-label">技能库</span>
-          </div>
-          <!-- OpenClaw WebUI Link -->
-          <div class="indicator indicator-action" @click="openWebUI">
-            <el-icon :size="14"><Link /></el-icon>
-            <span class="indicator-label">WebUI</span>
-          </div>
+          <!-- 自定义布局 -->
+          <el-tooltip content="自定义布局：排序功能按钮 / 统计卡片" placement="bottom">
+            <button class="top-layout-btn" @click="layoutDialogVisible = true">
+              <el-icon :size="14"><Operation /></el-icon>
+              <span>自定义布局</span>
+            </button>
+          </el-tooltip>
         </div>
       </div>
     </header>
@@ -87,6 +111,94 @@
           </el-card>
         </div>
       </section>
+
+    <!-- ========= 2.5 功能区（原顶部按钮，下移放大）========= -->
+    <section class="action-bar-section">
+      <div class="action-bar-inner">
+        <!-- GPU VRAM Usage -->
+        <div
+          class="action-slot"
+          v-if="store.gpuVramPercentage !== null && store.gpuVramPercentage !== undefined"
+          :style="{ order: statusBarOrder('gpu') }"
+        >
+          <el-tooltip :content="`${store.gpuVramUsedMb} / ${store.gpuVramTotalMb} MB`" placement="top">
+            <button class="action-btn action-gpu">
+              <el-icon :size="22"><Monitor /></el-icon>
+              <div class="action-text">
+                <div class="action-label">GPU 显存</div>
+                <div class="action-value">{{ store.gpuVramPercentage }}%</div>
+              </div>
+            </button>
+          </el-tooltip>
+        </div>
+
+        <!-- 文件管理 -->
+        <div class="action-slot" :style="{ order: statusBarOrder('fileManager') }">
+          <button class="action-btn" @click="fileManagerVisible = true">
+            <el-icon :size="22"><Folder /></el-icon>
+            <div class="action-text">
+              <div class="action-label">文件管理</div>
+              <div class="action-value">系统文件预览</div>
+            </div>
+          </button>
+        </div>
+
+        <!-- 计费配置 -->
+        <div class="action-slot" :style="{ order: statusBarOrder('billing') }">
+          <button class="action-btn" @click="billingDialogVisible = true">
+            <el-icon :size="22"><Money /></el-icon>
+            <div class="action-text">
+              <div class="action-label">计费配置</div>
+              <div class="action-value">按模型定价</div>
+            </div>
+          </button>
+        </div>
+
+        <!-- 技能库 -->
+        <div class="action-slot" :style="{ order: statusBarOrder('skills') }">
+          <button class="action-btn" @click="skillsDialogVisible = true">
+            <el-icon :size="22"><Briefcase /></el-icon>
+            <div class="action-text">
+              <div class="action-label">技能库</div>
+              <div class="action-value">管理 / 安装技能</div>
+            </div>
+          </button>
+        </div>
+
+        <!-- WebUI -->
+        <div class="action-slot" :style="{ order: statusBarOrder('webui') }">
+          <button class="action-btn" @click="openWebUI">
+            <el-icon :size="22"><Link /></el-icon>
+            <div class="action-text">
+              <div class="action-label">WebUI</div>
+              <div class="action-value">原生控制台</div>
+            </div>
+          </button>
+        </div>
+
+        <!-- 项目看板 -->
+        <div class="action-slot" :style="{ order: statusBarOrder('projects') }">
+          <button class="action-btn action-projects" @click="projectBoardVisible = true">
+            <el-icon :size="22"><Grid /></el-icon>
+            <div class="action-text">
+              <div class="action-label">项目看板</div>
+              <div class="action-value">{{ projectSummary }}</div>
+            </div>
+          </button>
+        </div>
+
+        <!-- Cron 任务中心 -->
+        <div class="action-slot" :style="{ order: statusBarOrder('cron') }">
+          <button class="action-btn action-cron" @click="cronCenterVisible = true">
+            <el-icon :size="22"><Timer /></el-icon>
+            <div class="action-text">
+              <div class="action-label">定时任务</div>
+              <div class="action-value">Cron 中心</div>
+            </div>
+          </button>
+        </div>
+      </div>
+    </section>
 
     <!-- ========= 3. 工作流进度步进条 / 空状态 ========= -->
     <div class="workflow-section" v-if="workflowData.projectName">
@@ -257,6 +369,7 @@
     <AgentDetailDrawer
       v-model:visible="drawerVisible"
       :agent-data="selectedAgent"
+      :auto-focus-input="drawerAutoFocusInput"
     />
 
     <!-- Token 消耗详情弹窗 -->
@@ -273,6 +386,21 @@
 
     <!-- Skills Dialog (REC-005) -->
     <SkillsDialog v-model:visible="skillsDialogVisible" />
+
+    <!-- 计费配置 Dialog -->
+    <BillingConfigDialog v-model:visible="billingDialogVisible" />
+
+    <!-- 文件管理 Dialog -->
+    <FileManagerDialog v-model:visible="fileManagerVisible" />
+
+    <!-- 自定义布局 Dialog -->
+    <LayoutSettingsDialog v-model:visible="layoutDialogVisible" />
+
+    <!-- 项目看板 Dialog -->
+    <ProjectBoardDialog v-model:visible="projectBoardVisible" />
+
+    <!-- Cron 任务中心 Dialog -->
+    <CronCenterDialog v-model:visible="cronCenterVisible" />
 
     <!-- REC-011: 加载超时提示 -->
     <el-alert
@@ -301,6 +429,12 @@ import TokenDetailDialog from '../components/TokenDetailDialog.vue'
 import VersionDialog from '../components/VersionDialog.vue'
 import GatewayDoctorDialog from '../components/GatewayDoctorDialog.vue'
 import SkillsDialog from '../components/SkillsDialog.vue'
+import BillingConfigDialog from '../components/BillingConfigDialog.vue'
+import FileManagerDialog from '../components/FileManagerDialog.vue'
+import LayoutSettingsDialog from '../components/LayoutSettingsDialog.vue'
+import ProjectBoardDialog from '../components/ProjectBoardDialog.vue'
+import CronCenterDialog from '../components/CronCenterDialog.vue'
+import { useLayoutSettings } from '../composables/useLayoutSettings'
 import { type WorkflowData } from '../data/workflow-steps'
 import {
   Monitor,
@@ -314,7 +448,14 @@ import {
   ArrowRight,
   QuestionFilled,
   Briefcase,
-  Link
+  Folder,
+  Bell,
+  BellFilled,
+  Operation,
+  Box,
+  Link,
+  Grid,
+  Timer
 } from '@element-plus/icons-vue'
 // el import removed (unused)
 
@@ -396,6 +537,28 @@ const doctorDialogVisible = ref(false)
 // Skills dialog (REC-005)
 const skillsDialogVisible = ref(false)
 
+// 计费配置 dialog
+const billingDialogVisible = ref(false)
+
+// 文件管理 dialog
+const fileManagerVisible = ref(false)
+
+// 自定义布局
+const { config: layoutConfig } = useLayoutSettings()
+const layoutDialogVisible = ref(false)
+
+// 项目看板
+const projectBoardVisible = ref(false)
+const projectSummary = ref('查看项目进度')
+
+// Cron 任务中心
+const cronCenterVisible = ref(false)
+
+function statusBarOrder(id: string): number {
+  const idx = layoutConfig.value.statusBar.indexOf(id)
+  return idx === -1 ? 100 : idx
+}
+
 // REC-011: 加载超时提示（加载超过 10s 时显示）
 const loadingHintVisible = ref(false)
 let loadingHintTimer: ReturnType<typeof setTimeout> | null = null
@@ -443,69 +606,47 @@ function openWebUI(): void {
   }
 }
 
-// Stats cards
-const statsCards = computed(() => [
+// Stats cards（每张卡片带 id，便于自定义排序）
+const statsCardsRaw = computed(() => [
+  { id: 'total', label: '总计', value: store.totalAgents, icon: Odometer, iconClass: 'icon-blue', class: 'stat-total' },
+  { id: 'running', label: '运行中', value: store.runningAgents.length, icon: VideoPlay, iconClass: 'icon-green', class: 'stat-running' },
+  { id: 'idle', label: '空闲', value: store.idleAgents.length, icon: VideoPause, iconClass: 'icon-yellow', class: 'stat-idle' },
+  { id: 'aborted', label: '已终止', value: store.abortedAgents.length, icon: CircleClose, iconClass: 'icon-gray', class: 'stat-aborted' },
+  { id: 'error', label: '错误', value: store.errorAgents.length, icon: CircleClose, iconClass: 'icon-red', class: 'stat-error' },
+  { id: 'uptime', label: '本次运行时间', value: store.formatUptime(store.uptimeMs), icon: Monitor, iconClass: 'icon-purple', class: 'stat-uptime' },
   {
-    label: '总计',
-    value: store.totalAgents,
-    icon: Odometer,
-    iconClass: 'icon-blue',
-    class: 'stat-total',
-  },
-  {
-    label: '运行中',
-    value: store.runningAgents.length,
-    icon: VideoPlay,
-    iconClass: 'icon-green',
-    class: 'stat-running',
-  },
-  {
-    label: '空闲',
-    value: store.idleAgents.length,
-    icon: VideoPause,
-    iconClass: 'icon-yellow',
-    class: 'stat-idle',
-  },
-  {
-    label: '已终止',
-    value: store.abortedAgents.length,
-    icon: CircleClose,
-    iconClass: 'icon-gray',
-    class: 'stat-aborted',
-  },
-  {
-    label: '错误',
-    value: store.errorAgents.length,
-    icon: CircleClose,
-    iconClass: 'icon-red',
-    class: 'stat-error',
-  },
-  {
-    label: '本次运行时间',
-    value: store.formatUptime(store.uptimeMs),
-    icon: Monitor,
-    iconClass: 'icon-purple',
-    class: 'stat-uptime',
-  },
-  {
+    id: 'tokens',
     label: '历史消耗Token',
     value: (store.totalTokensUsed || 0).toLocaleString(),
     subtitle: topModelSummary.value,
-    icon: Odometer,
-    iconClass: 'icon-orange',
-    class: 'stat-tokens stat-clickable',
+    icon: Odometer, iconClass: 'icon-orange', class: 'stat-tokens stat-clickable',
     onClick: () => { tokenDetailVisible.value = true },
   },
   {
+    id: 'cost',
     label: '本次运行费用',
     value: store.formatCost(store.totalCostCny),
-    subtitle: '',
-    icon: Money,
-    iconClass: 'icon-green',
-    class: 'stat-cost stat-clickable',
+    subtitle: costForecastSubtitle.value,
+    icon: Money, iconClass: 'icon-green', class: 'stat-cost stat-clickable',
     onClick: () => { tokenDetailVisible.value = true },
   },
 ])
+
+// 按用户自定义顺序重排
+const statsCards = computed(() => {
+  const order = layoutConfig.value.statsCards
+  const map = new Map(statsCardsRaw.value.map(c => [c.id, c]))
+  return order.map(id => map.get(id)).filter(Boolean) as typeof statsCardsRaw.value
+})
+
+// Sprint 1: 副标题显示今日 + 本月预估
+const costForecastSubtitle = computed(() => {
+  const s = store.costSummary
+  if (!s) return store.costModeLabel
+  const today = s.todayCNY < 0.01 ? '<¥0.01' : '¥' + s.todayCNY.toFixed(2)
+  const forecast = s.monthForecastCNY < 0.01 ? '<¥0.01' : '¥' + s.monthForecastCNY.toFixed(0)
+  return `今日 ${today} · 本月预估 ${forecast}`
+})
 
 // Token 卡片的模型摘要（最多显示 2 个主要模型）
 const topModelSummary = computed(() => {
@@ -529,15 +670,6 @@ const healthDisplay = computed(() => {
     default: return '检查中...'
   }
 })
-const healthClass = computed(() => {
-  switch (store.healthStatus) {
-    case 'healthy': return 'health-healthy'
-    case 'degraded': return 'health-degraded'
-    case 'unhealthy': return 'health-unhealthy'
-    case 'unknown': return 'health-unknown'
-    default: return 'health-unknown'
-  }
-})
 const healthIcon = computed(() => {
   if (store.healthStatus === 'healthy') return CircleCheck
   if (store.healthStatus === 'degraded') return Warning
@@ -545,9 +677,21 @@ const healthIcon = computed(() => {
 })
 
 // Actions
-function onAgentDetail(agent: AgentInfo): void {
+const drawerAutoFocusInput = ref(false)
+function onAgentDetail(agent: AgentInfo, opts?: { focusInput?: boolean }): void {
   selectedAgent.value = agent
+  drawerAutoFocusInput.value = !!opts?.focusInput
   drawerVisible.value = true
+}
+
+function formatNotifTime(ms: number): string {
+  const diff = Date.now() - ms
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} 小时前`
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 async function refreshAll(): Promise<void> {
@@ -667,6 +811,243 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 
+/* 顶部右侧容器（版本 + 网关 + 通知 + 自定义布局） */
+.status-top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 顶部紧凑指示器（共用基础样式） */
+.top-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.top-indicator:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: var(--accent, #38bdf8);
+}
+.top-ind-label {
+  color: var(--text-secondary, #94a3b8);
+  font-size: 11px;
+}
+.top-ind-value {
+  color: var(--text-primary, #e2e8f0);
+  font-weight: 600;
+  font-size: 12px;
+}
+.top-ind-value.mono {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+}
+
+/* 版本 */
+.top-indicator-version {
+  border-color: rgba(66,165,245,0.3);
+  background: rgba(66,165,245,0.06);
+}
+.top-indicator-version .el-icon { color: #93c5fd; }
+.top-indicator-version .top-ind-value { color: #93c5fd; }
+.top-indicator-version:hover { border-color: rgba(66,165,245,0.6); box-shadow: 0 2px 8px rgba(66,165,245,0.15); }
+
+/* 网关健康 */
+.top-indicator-healthy { border-color: rgba(76,175,80,0.3); background: rgba(76,175,80,0.06); }
+.top-indicator-healthy .el-icon, .top-indicator-healthy .top-ind-value { color: #4caf50; }
+.top-indicator-healthy:hover { border-color: rgba(76,175,80,0.6); }
+.top-indicator-unhealthy { border-color: rgba(244,67,54,0.3); background: rgba(244,67,54,0.06); }
+.top-indicator-unhealthy .el-icon, .top-indicator-unhealthy .top-ind-value { color: #f44336; }
+.top-indicator-degraded { border-color: rgba(255,152,0,0.3); background: rgba(255,152,0,0.06); }
+.top-indicator-degraded .el-icon, .top-indicator-degraded .top-ind-value { color: #ff9800; }
+.top-indicator-unknown .el-icon, .top-indicator-unknown .top-ind-value { color: #ffd54f; }
+
+/* 通知中心 */
+.top-indicator-notif { border-color: rgba(255,255,255,0.08); }
+.top-indicator-notif.has-unread {
+  border-color: rgba(244,67,54,0.5);
+  background: rgba(244,67,54,0.08);
+}
+.top-indicator-notif.has-unread .el-icon {
+  color: #ef4444;
+  animation: notif-shake 1.5s ease-in-out infinite;
+}
+.top-notif-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 8px;
+  line-height: 16px;
+  text-align: center;
+  border: 1px solid var(--bg-primary, #0f172a);
+}
+
+/* 自定义布局按钮 */
+.top-layout-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(139,92,246,0.08);
+  border: 1px solid rgba(139,92,246,0.25);
+  color: #c4b5fd;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+.top-layout-btn:hover {
+  background: rgba(139,92,246,0.18);
+  border-color: rgba(139,92,246,0.5);
+  color: #fff;
+}
+
+/* ==================== 功能区（action-bar）==================== */
+.action-bar-section {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 4px 24px 16px;
+}
+.action-bar-inner {
+  display: grid;
+  /* 自动按可用宽度均分，最小 168px，多余空间平摊 */
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 12px;
+}
+.action-slot {
+  display: flex;
+  width: 100%;
+}
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  background: var(--bg-card, #1e293b);
+  border: 1px solid var(--border-color, #2d3748);
+  border-radius: 10px;
+  color: var(--text-primary, #e2e8f0);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  width: 100%;
+  min-width: 0;  /* 允许收缩到 grid 单元宽度 */
+  text-align: left;
+  font-family: inherit;
+}
+.action-btn:hover {
+  background: var(--bg-card-hover, #273549);
+  border-color: var(--accent, #38bdf8);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(56,189,248,0.15);
+}
+.action-btn .el-icon {
+  flex-shrink: 0;
+  color: var(--accent, #38bdf8);
+}
+.action-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.action-label {
+  font-size: 11px;
+  color: var(--text-secondary, #94a3b8);
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.action-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #e2e8f0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.action-value.mono {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 13px;
+}
+.action-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 9px;
+  line-height: 18px;
+  text-align: center;
+  border: 2px solid var(--bg-primary, #0f172a);
+}
+
+/* 健康状态变体 */
+.action-btn.action-healthy .el-icon { color: #4caf50; }
+.action-btn.action-healthy { border-color: rgba(76,175,80,0.25); background: rgba(76,175,80,0.04); }
+.action-btn.action-healthy:hover { border-color: rgba(76,175,80,0.6); box-shadow: 0 4px 12px rgba(76,175,80,0.15); }
+
+.action-btn.action-unhealthy .el-icon { color: #f44336; }
+.action-btn.action-unhealthy { border-color: rgba(244,67,54,0.3); background: rgba(244,67,54,0.06); }
+
+.action-btn.action-degraded .el-icon { color: #ff9800; }
+.action-btn.action-degraded { border-color: rgba(255,152,0,0.25); }
+
+.action-btn.action-unknown .el-icon { color: #ffd54f; }
+
+.action-btn.action-version .el-icon,
+.action-btn.action-version .action-value { color: #93c5fd; }
+.action-btn.action-version { border-color: rgba(66,165,245,0.25); background: rgba(66,165,245,0.04); }
+
+.action-btn.action-gpu .el-icon { color: #ce93d8; }
+.action-btn.action-gpu .action-value { color: #e1bee7; font-family: 'Cascadia Code', monospace; }
+.action-btn.action-gpu { border-color: rgba(156,39,176,0.25); background: rgba(156,39,176,0.04); }
+
+.action-btn.action-notif.has-unread {
+  border-color: rgba(244,67,54,0.5);
+  background: rgba(244,67,54,0.08);
+}
+.action-btn.action-notif.has-unread .el-icon {
+  color: #ef4444;
+  animation: notif-shake 1.5s ease-in-out infinite;
+}
+
+.action-btn.action-projects .el-icon { color: #34d399; }
+.action-btn.action-projects { border-color: rgba(52,211,153,0.25); background: rgba(52,211,153,0.04); }
+.action-btn.action-projects:hover { border-color: rgba(52,211,153,0.6); box-shadow: 0 4px 12px rgba(52,211,153,0.15); }
+
+.action-btn.action-cron .el-icon { color: #a78bfa; }
+.action-btn.action-cron { border-color: rgba(167,139,250,0.25); background: rgba(167,139,250,0.04); }
+.action-btn.action-cron:hover { border-color: rgba(167,139,250,0.6); box-shadow: 0 4px 12px rgba(167,139,250,0.15); }
+
+
 .indicator {
   display: flex;
   align-items: center;
@@ -741,6 +1122,59 @@ onUnmounted(() => {
 .indicator-action .indicator-label {
   color: var(--text-primary);
   font-weight: 500;
+}
+
+/* 自定义布局：每个 indicator 外层包装，作为 flex 直接子元素以接收 order */
+.indicator-slot {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 自定义布局按钮 */
+.indicator-layout {
+  padding: 5px 8px !important;
+  background: rgba(255,255,255,0.03);
+  opacity: 0.6;
+}
+.indicator-layout:hover {
+  opacity: 1;
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139,92,246,0.4) !important;
+}
+
+/* 通知铃铛 */
+.notif-bell {
+  position: relative;
+}
+.notif-bell.has-unread {
+  border-color: rgba(244,67,54,0.4) !important;
+  background: rgba(244,67,54,0.08);
+}
+.notif-bell.has-unread .el-icon {
+  color: #ef4444;
+  animation: notif-shake 1.5s ease-in-out infinite;
+}
+@keyframes notif-shake {
+  0%, 100% { transform: rotate(0deg); }
+  10%, 30% { transform: rotate(-15deg); }
+  20%, 40% { transform: rotate(15deg); }
+  50% { transform: rotate(0deg); }
+}
+.notif-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 8px;
+  line-height: 16px;
+  text-align: center;
+  border: 1px solid rgba(0,0,0,0.3);
 }
 
 .loading-hint-alert {
@@ -1189,4 +1623,58 @@ onUnmounted(() => {
     padding: 10px 12px;
   }
 }
+</style>
+
+<!-- 非 scoped：通知 popper 渲染到 body，需要全局选择器 -->
+<style>
+.notif-popper {
+  background: #1e293b !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  padding: 0 !important;
+  max-height: 480px;
+  overflow: hidden;
+}
+.notif-panel { display: flex; flex-direction: column; max-height: 480px; }
+.notif-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-weight: 700;
+  font-size: 13px;
+  color: rgba(255,255,255,0.9);
+}
+.notif-actions { display: flex; gap: 4px; }
+.notif-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 30px 0;
+  color: rgba(255,255,255,0.4);
+  font-size: 12px;
+}
+.notif-empty .el-icon { font-size: 24px; }
+.notif-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 380px;
+}
+.notif-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.15s;
+}
+.notif-item:hover { background: rgba(255,255,255,0.03); }
+.notif-item.unread { background: rgba(66,165,245,0.06); }
+.notif-error.unread { background: rgba(244,67,54,0.08); }
+.notif-icon { font-size: 16px; flex-shrink: 0; }
+.notif-body { flex: 1; min-width: 0; }
+.notif-agent { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.9); }
+.notif-msg { font-size: 12px; color: rgba(255,255,255,0.7); margin-top: 2px; line-height: 1.4; word-break: break-word; }
+.notif-time { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 4px; }
 </style>

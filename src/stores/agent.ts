@@ -90,6 +90,62 @@ export const useAgentStore = defineStore('agent', () => {
   const lastUpdateTime = ref(0)
 
   // ============================================
+  // 通知中心 (Sprint 1)
+  // ============================================
+  interface NotificationItem {
+    id: string
+    type: 'error' | 'aborted' | 'info'
+    agentId: string
+    agentName: string
+    message: string
+    timestamp: number
+    read: boolean
+  }
+  const notifications = ref<NotificationItem[]>([])
+  const unreadNotifications = computed(() => notifications.value.filter(n => !n.read).length)
+
+  function addNotification(n: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>) {
+    notifications.value.unshift({
+      ...n,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: Date.now(),
+      read: false,
+    })
+    // 上限 50 条
+    if (notifications.value.length > 50) notifications.value = notifications.value.slice(0, 50)
+  }
+  function markAllNotificationsRead() {
+    notifications.value = notifications.value.map(n => ({ ...n, read: true }))
+  }
+  function clearNotifications() {
+    notifications.value = []
+  }
+
+  function checkStatusTransitions(oldList: AgentInfo[], newList: AgentInfo[]) {
+    if (oldList.length === 0) return  // 初次加载不报警
+    const oldMap = new Map(oldList.map(a => [a.key, a.status]))
+    for (const cur of newList) {
+      const prev = oldMap.get(cur.key)
+      if (!prev) continue  // 新出现的 agent 不算状态变化
+      if (prev !== 'error' && cur.status === 'error') {
+        addNotification({
+          type: 'error',
+          agentId: cur.key.split(':')[1] || cur.key,
+          agentName: cur.name,
+          message: `进入错误状态：${cur.errorMessage || cur.lastError || '未知错误'}`,
+        })
+      } else if (prev !== 'aborted' && cur.status === 'aborted') {
+        addNotification({
+          type: 'aborted',
+          agentId: cur.key.split(':')[1] || cur.key,
+          agentName: cur.name,
+          message: '会话被中断',
+        })
+      }
+    }
+  }
+
+  // ============================================
   // REC-071: Agent 消息气泡状态
   // ============================================
   interface MessageBubbleData {
@@ -191,23 +247,164 @@ export const useAgentStore = defineStore('agent', () => {
     }, 0)
   })
 
-  // 3. 总费用 - Gateway 从启动至今的累计
-  // 计算公式:总费用 = OpenClaw API 费用 + 电费
-  // 电费系数通过 VITE_ELECTRICITY_PER_HOUR 环境变量配置,默认 ¥2/小时
-  // 使用显式检查避免 || 运算符误判 0 值(Number("0") || 2 → 2)
-  const raw = import.meta.env.VITE_ELECTRICITY_PER_HOUR
-  const parsed = raw === undefined || raw === '' ? undefined : Number(raw)
-  const ELECTRICITY_PER_HOUR = (typeof parsed === 'number' && !isNaN(parsed)) ? parsed : 2
+  // 3. 总费用 - 按 billing-config.json 的每模型规则计算（v1.6+）
+  // 计费配置从后端 /api/billing-config 读取（JSON 文件），UI 可编辑
+  // 兼容旧 env 的 fallback：未配置时按 electricity 模式（API + 电费）
+  function parseNum(v: unknown, fallback: number): number {
+    if (v === undefined || v === null || v === '') return fallback
+    const n = Number(v)
+    return isNaN(n) ? fallback : n
+  }
+  const ELECTRICITY_PER_HOUR = parseNum(import.meta.env.VITE_ELECTRICITY_PER_HOUR, 2)
+  const HOURS_PER_MONTH = 30 * 24
+
+  // 计费配置（从后端拉取）
+  interface ModelBillingConfig {
+    mode: 'subscription_monthly' | 'per_token' | 'use_default' | 'free'
+    monthlyCNY?: number
+    quotaTokensPerMonth?: number
+    overTokenPriceCNYPerMillion?: number
+    inputPriceCNYPerMillion?: number
+    outputPriceCNYPerMillion?: number
+    cacheReadPriceCNYPerMillion?: number
+    cacheWritePriceCNYPerMillion?: number
+    discountFactor?: number
+    discountStartHour?: number
+    discountEndHour?: number
+    note?: string
+  }
+  interface BillingConfig {
+    version: number
+    models: Record<string, ModelBillingConfig>
+    fallback: ModelBillingConfig
+    globalAddons?: {
+      electricityPerHour?: number   // 全局电费叠加
+    }
+  }
+  const billingConfig = ref<BillingConfig | null>(null)
+
+  async function fetchBillingConfig(): Promise<void> {
+    try {
+      const resp = await fetch('/api/billing-config')
+      if (resp.ok) billingConfig.value = await resp.json()
+    } catch (e) {
+      console.warn('[AgentStore] fetchBillingConfig 失败，使用默认电费模式:', e)
+    }
+  }
+
+  // 费用摘要：今日 / 本月 / 本月预估
+  const costSummary = ref<{ todayCNY: number; monthCNY: number; monthForecastCNY: number } | null>(null)
+  async function fetchCostSummary(): Promise<void> {
+    try {
+      const resp = await fetch('/api/cost-summary')
+      if (resp.ok) costSummary.value = await resp.json()
+    } catch (e) {
+      console.warn('[AgentStore] fetchCostSummary failed:', e)
+    }
+  }
+
+  async function saveBillingConfig(cfg: BillingConfig): Promise<{ success: boolean; error?: string }> {
+    try {
+      const resp = await fetch('/api/billing-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      })
+      const data = await resp.json()
+      if (data.success) {
+        billingConfig.value = cfg
+        return { success: true }
+      }
+      return { success: false, error: data.error || '保存失败' }
+    } catch (e: any) {
+      return { success: false, error: e.message }
+    }
+  }
+
+  /**
+   * 按当前时段是否在折扣窗口内，返回折扣系数（1.0 = 原价）
+   */
+  function getCurrentDiscountFactor(cfg: ModelBillingConfig): number {
+    if (cfg.discountFactor === undefined) return 1
+    if (cfg.discountStartHour === undefined || cfg.discountEndHour === undefined) return 1
+    const hour = new Date().getHours()
+    const start = cfg.discountStartHour
+    const end = cfg.discountEndHour
+    const inWindow = start < end
+      ? (hour >= start && hour < end)
+      : (hour >= start || hour < end)  // 跨日
+    return inWindow ? cfg.discountFactor : 1
+  }
+
+  /**
+   * 单模型成本计算（按 token 用量 + 计费配置）
+   * 注：tokens 是合并的 input+output，无法精确区分，按"7 成 input + 3 成 output"经验值估算
+   */
+  function calcModelCost(modelId: string, tokens: number, _cost: number): number {
+    const cfg = billingConfig.value?.models[modelId] || billingConfig.value?.fallback
+    if (!cfg) return _cost  // 没有配置 → 用 OpenClaw 算的
+    switch (cfg.mode) {
+      case 'free':
+        return 0
+      case 'use_default':
+        return _cost
+      case 'subscription_monthly': {
+        // 月费按本次运行时长比例分摊；超过配额部分按超额单价
+        const uptimeHours = uptimeMs.value / (1000 * 60 * 60)
+        const baseCost = ((cfg.monthlyCNY ?? 0) * uptimeHours) / HOURS_PER_MONTH
+        let overCost = 0
+        if (cfg.quotaTokensPerMonth && tokens > cfg.quotaTokensPerMonth) {
+          const over = tokens - cfg.quotaTokensPerMonth
+          overCost = (over / 1_000_000) * (cfg.overTokenPriceCNYPerMillion ?? 0)
+        }
+        return baseCost + overCost
+      }
+      case 'per_token': {
+        // 经验拆分：input ≈ 70%、output ≈ 30%
+        const inputTokens = tokens * 0.7
+        const outputTokens = tokens * 0.3
+        const inputPrice = cfg.inputPriceCNYPerMillion ?? 0
+        const outputPrice = cfg.outputPriceCNYPerMillion ?? 0
+        const factor = getCurrentDiscountFactor(cfg)
+        return ((inputTokens / 1_000_000) * inputPrice + (outputTokens / 1_000_000) * outputPrice) * factor
+      }
+      default:
+        return _cost
+    }
+  }
+
+  /** 各模型计算后的 cost 明细 */
+  const computedCostByModel = computed<Record<string, { tokens: number; cost: number; rawCost: number }>>(() => {
+    const out: Record<string, { tokens: number; cost: number; rawCost: number }> = {}
+    const byModel = globalUsage.value.byModel || {}
+    for (const [model, data] of Object.entries(byModel)) {
+      out[model] = {
+        tokens: data.tokens,
+        cost: calcModelCost(model, data.tokens, data.cost),
+        rawCost: data.cost,
+      }
+    }
+    return out
+  })
 
   const totalCostCny = computed(() => {
-    // OpenClaw API 实际费用(usage-stats 统计的 Gateway 启动至今的费用)
+    // 优先用 billing-config 的每模型计算结果
+    if (billingConfig.value) {
+      const modelTotal = Object.values(computedCostByModel.value).reduce((s, d) => s + d.cost, 0)
+      const electricityAddon = billingConfig.value.globalAddons?.electricityPerHour ?? 0
+      const uptimeHours = uptimeMs.value / (1000 * 60 * 60)
+      return modelTotal + uptimeHours * electricityAddon
+    }
+    // 兼容旧逻辑：未拉到配置时用 electricity 模式
     const openclawCost = globalUsage.value.totalCost || 0
-
-    // 电费 = 运行时长 × 每小时电费
     const uptimeHours = uptimeMs.value / (1000 * 60 * 60)
-    const electricityCost = uptimeHours * ELECTRICITY_PER_HOUR
+    return openclawCost + uptimeHours * ELECTRICITY_PER_HOUR
+  })
 
-    return openclawCost + electricityCost
+  const costModeLabel = computed<string>(() => {
+    if (!billingConfig.value) return '本地部署（API + 电费）'
+    const modelCount = Object.keys(billingConfig.value.models).length
+    return `按模型计费（已配置 ${modelCount} 个）`
   })
 
   // Methods
@@ -453,7 +650,18 @@ export const useAgentStore = defineStore('agent', () => {
         return agent
       })
 
-      const sessionAgentIds = new Set(sessionAgents.map((a: AgentInfo) => {
+      // 按 agentId 去重（同一 agent 可能有多个 session 条目，保留最近活跃的那个）
+      const agentIdMap = new Map<string, AgentInfo>()
+      for (const agent of sessionAgents) {
+        const agentId = (agent.key || '').split(':')[1] || agent.key
+        const existing = agentIdMap.get(agentId)
+        if (!existing || (agent.lastActivity ?? 0) >= (existing.lastActivity ?? 0)) {
+          agentIdMap.set(agentId, agent)
+        }
+      }
+      const deduplicatedSessionAgents = [...agentIdMap.values()]
+
+      const sessionAgentIds = new Set(deduplicatedSessionAgents.map((a: AgentInfo) => {
         // session key 格式: agent:{agentId}:{sessionId}
         const parts = (a.key || '').split(':')
         return parts[1] || ''
@@ -477,10 +685,13 @@ export const useAgentStore = defineStore('agent', () => {
           // historicalTokens 故意不设置，走 AgentCard 的响应式 computed 路径
         }))
 
-      agents.value = [...sessionAgents, ...configuredOnlyAgents]
+      const newAgents = [...deduplicatedSessionAgents, ...configuredOnlyAgents]
+      // 检测状态变化：进入 error / aborted 时推通知
+      checkStatusTransitions(agents.value, newAgents)
+      agents.value = newAgents
       lastUpdateTime.value = Date.now()
       const runningIds = [...runningStatusMap.entries()].filter(([, v]) => v === 'running').map(([k]) => k)
-      console.log(`[AgentStore] sessions=${sessions.length} configured=${configuredAgents.length} running=[${runningIds.join(',') || 'none'}] total=${agents.value.length}`)
+      console.log(`[AgentStore] sessions=${sessions.length}→dedup=${deduplicatedSessionAgents.length} configured=${configuredAgents.length} running=[${runningIds.join(',') || 'none'}] total=${agents.value.length}`)
     } catch (e) {
       console.error('[AgentStore] fetchAgents error:', e)
       agents.value = []
@@ -687,13 +898,21 @@ export const useAgentStore = defineStore('agent', () => {
 
   /**
    * 发送消息到 Agent 会话
-   * 使用 Gateway REST API /tools/invoke with tool=sessions_send
+   * 改用本地 unified-service 的 /api/agent-send-message → openclaw CLI
+   * （Gateway 的 sessions_send 是 agent 内部 tool，不能从外部 /tools/invoke 调用）
    */
   async function sendAgentMessage(sessionKey: string, message: string): Promise<void> {
     try {
-      console.log(`[AgentStore] Sending to ${sessionKey}: ${message.slice(0, 100)}`)
-      const result = await sessionsSend(sessionKey, message, 0)
-      console.log(`[AgentStore] Send result:`, result)
+      const agentId = extractAgentId(sessionKey)
+      console.log(`[AgentStore] Sending to ${sessionKey} (agentId=${agentId}): ${message.slice(0, 100)}`)
+      const resp = await fetch('/api/agent-send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId, message }),
+      })
+      const result = await resp.json()
+      if (!result.success) throw new Error(result.error || '发送失败')
+      console.log(`[AgentStore] Send dispatched:`, result)
     } catch (e: any) {
       console.error(`[AgentStore] sendAgentMessage(${sessionKey}) error:`, e)
       throw e
@@ -889,13 +1108,16 @@ export const useAgentStore = defineStore('agent', () => {
       return []
     }
 
-    // 过滤系统消息
+    // 过滤系统消息或不应展示的内容
     function isSystemMessage(content: string): boolean {
       return content.includes('巡检异常通知')
         || content.includes('巡检提醒')
         || content.includes('HEARTBEAT_OK')
+        || content.includes('HEARTBEAT')
         || content.startsWith('收到巡检报告')
         || content.includes('巡检异常汇报')
+        || content.includes('heartbeat')
+        || content.includes('Heartbeat')
     }
 
     for (const agent of agents.value) {
@@ -932,6 +1154,8 @@ export const useAgentStore = defineStore('agent', () => {
             if (role === 'user' || role === 'assistant' || role === 'agent' || role === 'tool') {
               const parts = extractContentParts(msg)
               for (const part of parts) {
+                // thinking 是模型内部推理，不展示给用户
+                if (part.contentType === 'thinking') continue
                 if (part.content && !isSystemMessage(part.content)) {
                   console.log(`[REC-085] ✅ agent=${agent.key} 显示 part [${part.contentType}]:`, part.content.slice(0, 150))
                   updateAgentBubble(agent.key, part.content, part.contentType, part.isError)
@@ -986,7 +1210,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function subscribeAgents(): Promise<() => void> {
     isPolling.value = true
-    await Promise.all([fetchAgents(), fetchGlobalUsage(), fetchHealth(), fetchGatewayUptime(), fetchAgentNames(), fetchGpuVram()])
+    await Promise.all([fetchAgents(), fetchGlobalUsage(), fetchHealth(), fetchGatewayUptime(), fetchAgentNames(), fetchGpuVram(), fetchBillingConfig(), fetchCostSummary()])
 
     // REC-071: 首次加载时静默初始化消息计数器
     for (const agent of agents.value) {
@@ -1004,6 +1228,7 @@ export const useAgentStore = defineStore('agent', () => {
       fetchAgents()
       fetchGlobalUsage()
       fetchGatewayUptime() // Also refresh gateway uptime
+      fetchCostSummary()  // Sprint 1: 顶部费用预估
     }, AGENT_POLL_INTERVAL)
 
     const healthInterval = setInterval(() => {
@@ -1069,6 +1294,19 @@ export const useAgentStore = defineStore('agent', () => {
     uptimeMs,
     totalTokensUsed,
     totalCostCny,
+    costModeLabel,
+    billingConfig,
+    fetchBillingConfig,
+    saveBillingConfig,
+    computedCostByModel,
+    costSummary,
+    fetchCostSummary,
+    // Notifications (Sprint 1)
+    notifications,
+    unreadNotifications,
+    addNotification,
+    markAllNotificationsRead,
+    clearNotifications,
     // Methods
     setFilterStatus,
     formatUptime,

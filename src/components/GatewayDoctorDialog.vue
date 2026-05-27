@@ -33,26 +33,84 @@
       </div>
     </div>
 
-    <!-- 诊断输出 (stdout) -->
-    <div v-if="result?.stdout" class="doctor-output">
-      <div class="output-header">
-        <el-icon :size="14"><Document /></el-icon>
-        <span>标准输出</span>
+    <!-- ▼ 中文解读（默认显示） -->
+    <div v-if="result && chineseSummary.length > 0" class="doctor-cn-summary">
+      <div class="cn-summary-header">
+        <el-icon><Document /></el-icon>
+        <span>诊断解读（中文）</span>
       </div>
-      <pre class="output-content">{{ result.stdout }}</pre>
+      <div
+        v-for="(item, i) in chineseSummary"
+        :key="i"
+        class="cn-item"
+        :class="`cn-item-${item.level}`"
+      >
+        <span class="cn-item-icon">{{ item.icon }}</span>
+        <div class="cn-item-body">
+          <div class="cn-item-title">{{ item.title }}</div>
+          <div v-if="item.detail" class="cn-item-detail">{{ item.detail }}</div>
+          <div v-if="item.suggestion" class="cn-item-suggest">💡 {{ item.suggestion }}</div>
+        </div>
+      </div>
     </div>
 
-    <!-- 错误输出 (stderr) -->
-    <div v-if="result?.stderr" class="doctor-output doctor-output-error">
-      <div class="output-header">
-        <el-icon :size="14"><Warning /></el-icon>
-        <span>错误输出</span>
-      </div>
-      <pre class="output-content">{{ result.stderr }}</pre>
+    <!-- ▼ 原始输出（默认折叠） -->
+    <div v-if="result?.stdout || result?.stderr" class="doctor-raw-toggle">
+      <el-button link size="small" @click="showRaw = !showRaw">
+        <el-icon><component :is="showRaw ? ArrowUp : ArrowDown" /></el-icon>
+        {{ showRaw ? '收起原始输出' : '查看原始输出（英文）' }}
+      </el-button>
     </div>
 
-    <!-- 空状态 -->
-    <el-empty v-if="!running && !result" description="暂无诊断结果" :image-size="60" />
+    <template v-if="showRaw">
+      <!-- 诊断输出 (stdout) -->
+      <div v-if="result?.stdout" class="doctor-output">
+        <div class="output-header">
+          <el-icon :size="14"><Document /></el-icon>
+          <span>标准输出</span>
+        </div>
+        <pre class="output-content">{{ result.stdout }}</pre>
+      </div>
+
+      <!-- 错误输出 (stderr) -->
+      <div v-if="result?.stderr" class="doctor-output doctor-output-error">
+        <div class="output-header">
+          <el-icon :size="14"><Warning /></el-icon>
+          <span>错误输出</span>
+        </div>
+        <pre class="output-content">{{ result.stderr }}</pre>
+      </div>
+    </template>
+
+    <!-- 错误详情（axios / 后端报错时显示真实原因） -->
+    <div v-if="!running && errorDetail && !result" class="doctor-error-box">
+      <div class="doctor-error-title">
+        <el-icon><Warning /></el-icon>
+        失败原因
+      </div>
+      <pre class="doctor-error-text">{{ errorDetail }}</pre>
+      <div class="doctor-error-hint">
+        常见原因：① 后端服务 31002 端口未启动 ② openclaw CLI 不在 PATH ③ doctor 命令执行超过 180 秒
+      </div>
+    </div>
+
+    <!-- 空状态（仅在从未运行过、也没错误时显示） -->
+    <el-empty v-if="!running && !result && !errorDetail" description="暂无诊断结果" :image-size="60" />
+
+    <template #footer>
+      <div class="doctor-footer">
+        <el-button @click="dialogVisible = false">关闭</el-button>
+        <el-button
+          type="primary"
+          :icon="Refresh"
+          :loading="running"
+          :disabled="running"
+          @click="runDiagnosis"
+        >
+          {{ running ? `运行中 (${elapsedSec}s)` : '重新诊断' }}
+        </el-button>
+      </div>
+    </template>
   </el-dialog>
 </template>
 
@@ -66,6 +124,9 @@ import {
   Warning,
   CircleCheck,
   CircleClose,
+  Refresh,
+  ArrowUp,
+  ArrowDown,
 } from '@element-plus/icons-vue'
 
 const props = withDefaults(defineProps<{
@@ -86,6 +147,146 @@ const dialogVisible = computed({
 
 const running = ref(false)
 const result = ref<DoctorResult | null>(null)
+const errorDetail = ref<string>('')  // axios 真实错误
+const elapsedSec = ref(0)
+const showRaw = ref(false)  // 原始输出折叠状态
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
+
+// ── 中文翻译解读：把 openclaw doctor 的英文输出转成可读中文条目 ──
+interface SummaryItem {
+  level: 'success' | 'warning' | 'error' | 'info'
+  icon: string
+  title: string
+  detail?: string
+  suggestion?: string
+}
+
+const chineseSummary = computed<SummaryItem[]>(() => {
+  if (!result.value) return []
+  const items: SummaryItem[] = []
+  const stdout = result.value.stdout || ''
+  const stderr = result.value.stderr || ''
+
+  // 1. 整体状态
+  if (result.value.success) {
+    items.push({
+      level: 'success',
+      icon: '✅',
+      title: '整体诊断通过',
+      detail: 'OpenClaw Gateway 核心服务运行正常',
+    })
+  } else {
+    items.push({
+      level: 'error',
+      icon: '❌',
+      title: '诊断检测到问题',
+      detail: '请查看下方详细项',
+    })
+  }
+
+  // 2. Plugins 状态
+  const pluginsBlock = stdout.match(/Plugins[\s\S]{0,200}?Loaded:\s*(\d+)[\s\S]{0,100}?Imported:\s*(\d+)[\s\S]{0,100}?Disabled:\s*(\d+)[\s\S]{0,100}?Errors:\s*(\d+)/)
+  if (pluginsBlock) {
+    const [, loaded, imported, disabled, errors] = pluginsBlock
+    items.push({
+      level: Number(errors) > 0 ? 'error' : 'info',
+      icon: '🔌',
+      title: `插件状态：已加载 ${loaded} 个 · 已导入 ${imported} 个 · 已禁用 ${disabled} 个 · 错误 ${errors} 个`,
+      detail: Number(disabled) > 0 ? `${disabled} 个插件被禁用属于正常情况（未启用对应功能）` : undefined,
+    })
+  }
+
+  // 3. Missing requirements
+  const missingReq = stdout.match(/Missing requirements:\s*(\d+)/)
+  if (missingReq) {
+    const n = Number(missingReq[1])
+    items.push({
+      level: n > 0 ? 'warning' : 'success',
+      icon: n > 0 ? '⚠️' : '✓',
+      title: n > 0 ? `缺失依赖 ${n} 项` : '依赖完整',
+      detail: n > 0 ? '可能影响部分功能，建议查看原始输出确认' : undefined,
+    })
+  }
+
+  // 4. Blocked by allowlist
+  const blocked = stdout.match(/Blocked by allowlist:\s*(\d+)/)
+  if (blocked && Number(blocked[1]) > 0) {
+    items.push({
+      level: 'info',
+      icon: 'ℹ️',
+      title: `白名单拦截 ${blocked[1]} 项`,
+      detail: '这是 plugins.allow 安全策略主动拦截，通常无需处理',
+    })
+  }
+
+  // 5. Doctor warnings 段落
+  if (stdout.includes('Doctor warnings')) {
+    const warningSection = stdout.split('Doctor warnings')[1]?.split(/[─┤├╯]{3,}/)[0] || ''
+    if (warningSection.includes('plugins.allow is restrictive')) {
+      items.push({
+        level: 'warning',
+        icon: '⚠️',
+        title: '插件白名单较严格',
+        detail: '部分内置插件因 plugins.allow 限制未启用，但已在 legacy 兼容模式下仍可被识别',
+        suggestion: '若确认不需要被拦截的插件，可在 openclaw.json 中将 plugins.bundledDiscovery 改为 "allowlist"',
+      })
+    }
+    if (warningSection.includes('bundled provider discovery')) {
+      // 已经在上面提到了，跳过
+    }
+  }
+
+  // 6. stderr 中的 skill symlink-escape
+  if (stderr.includes('symlink-escape')) {
+    const escapeMatches = stderr.match(/symlink-escape/g) || []
+    items.push({
+      level: 'info',
+      icon: 'ℹ️',
+      title: `技能软链接越界已跳过：${escapeMatches.length} 项`,
+      detail: '部分技能的软链接指向了配置根目录之外的位置，OpenClaw 为安全起见跳过了它们',
+      suggestion: '如果某个技能不工作，检查 ~/clawd/skills 下对应技能的软链接指向是否正确',
+    })
+  }
+
+  // 7. stderr 中的其他常见模式
+  if (stderr.includes('ERR_MODULE_NOT_FOUND')) {
+    items.push({
+      level: 'error',
+      icon: '❌',
+      title: '模块未找到错误',
+      detail: 'Node.js 找不到某个 OpenClaw 内部模块，可能是版本不匹配',
+      suggestion: '尝试 brew upgrade openclaw 或 npm i -g openclaw@latest',
+    })
+  }
+  if (stderr.match(/EADDRINUSE|address already in use/i)) {
+    items.push({
+      level: 'error',
+      icon: '❌',
+      title: '端口被占用',
+      detail: 'Gateway 想监听的端口已被其他进程占用',
+      suggestion: '运行 lsof -i :18789 查看占用进程，然后 kill 或换端口',
+    })
+  }
+  if (stderr.match(/permission denied|EACCES/i)) {
+    items.push({
+      level: 'error',
+      icon: '❌',
+      title: '权限不足',
+      detail: 'OpenClaw 没有权限读写某个文件或目录',
+      suggestion: '检查 ~/.openclaw 目录的所有权和读写权限',
+    })
+  }
+
+  // 8. 命令信息
+  items.push({
+    level: 'info',
+    icon: '🔧',
+    title: `执行命令：${result.value.command}`,
+    detail: `平台：${result.value.platform}`,
+  })
+
+  return items
+})
 
 // Status states: 'idle' | 'running' | 'success' | 'failed'
 const status = ref<'idle' | 'running' | 'success' | 'failed'>('idle')
@@ -93,7 +294,7 @@ const status = ref<'idle' | 'running' | 'success' | 'failed'>('idle')
 const statusText = computed(() => {
   switch (status.value) {
     case 'idle': return '等待执行...'
-    case 'running': return '正在执行诊断命令...'
+    case 'running': return `正在执行诊断命令（已 ${elapsedSec.value} 秒，通常需要 20-40 秒）...`
     case 'success': return '诊断完成'
     case 'failed': return '诊断失败'
     default: return ''
@@ -132,38 +333,47 @@ watch(() => props.visible, async (val) => {
     // Reset state
     status.value = 'idle'
     result.value = null
+    errorDetail.value = ''
+    showRaw.value = false  // 重新打开时折叠原始输出
 
     // Auto-run doctor on open
     await nextTick()
     runDiagnosis()
+  } else {
+    // 关闭时清理计时器
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
   }
 })
 
 async function runDiagnosis(): Promise<void> {
+  // 防止重复触发
+  if (running.value) return
   running.value = true
   status.value = 'running'
   result.value = null
+  errorDetail.value = ''
+  elapsedSec.value = 0
+  // 启动计时器
+  if (elapsedTimer) clearInterval(elapsedTimer)
+  elapsedTimer = setInterval(() => { elapsedSec.value += 1 }, 1000)
 
   try {
-    const data = await runDoctor()
-    if (data) {
-      result.value = data
-      status.value = data.success ? 'success' : 'failed'
-      if (data.success) {
-        ElMessage.success('诊断修复完成')
-      } else {
-        ElMessage.warning('诊断完成，但检测到问题')
-      }
+    const data = await runDoctor()  // 现在错误会 throw
+    result.value = data
+    status.value = data.success ? 'success' : 'failed'
+    if (data.success) {
+      ElMessage.success(`诊断完成（用时 ${elapsedSec.value} 秒）`)
     } else {
-      status.value = 'failed'
-      ElMessage.error('诊断请求失败，请检查后端服务')
+      ElMessage.warning('诊断完成，但检测到问题')
     }
-  } catch (e: unknown) {
+  } catch (e: any) {
     console.error('[GatewayDoctorDialog] runDiagnosis error:', e)
     status.value = 'failed'
-    ElMessage.error('诊断执行异常')
+    errorDetail.value = e?.message || String(e)
+    ElMessage.error('诊断失败：' + errorDetail.value.slice(0, 120))
   } finally {
     running.value = false
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
   }
 }
 
@@ -312,12 +522,111 @@ async function runDiagnosis(): Promise<void> {
 }
 
 /* ── Footer ── */
-.dialog-footer {
+.dialog-footer,
+.doctor-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color);
+}
+
+/* ── 中文解读摘要 ── */
+.doctor-cn-summary {
+  margin-bottom: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+.cn-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: rgba(66,165,245,0.08);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+  font-weight: 600;
+  color: #90caf9;
+}
+.cn-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.cn-item:last-child { border-bottom: none; }
+.cn-item-success { background: rgba(76,175,80,0.04); }
+.cn-item-warning { background: rgba(245,158,11,0.04); }
+.cn-item-error { background: rgba(244,67,54,0.05); }
+.cn-item-icon {
+  font-size: 18px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+.cn-item-body { flex: 1; min-width: 0; }
+.cn-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+.cn-item-detail {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.cn-item-suggest {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #fbbf24;
+  background: rgba(245,158,11,0.06);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 2px solid #fbbf24;
+}
+
+/* ── 原始输出切换 ── */
+.doctor-raw-toggle {
+  margin: 8px 0 12px;
+  text-align: center;
+}
+
+/* ── 错误详情 ── */
+.doctor-error-box {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: rgba(244, 67, 54, 0.06);
+  border: 1px solid rgba(244, 67, 54, 0.25);
+  border-radius: 8px;
+}
+.doctor-error-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f87171;
+  margin-bottom: 8px;
+}
+.doctor-error-text {
+  margin: 0 0 8px 0;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 6px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+  color: #fca5a5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.doctor-error-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  padding-top: 4px;
 }
 
 /* ── 弹框样式 ── */

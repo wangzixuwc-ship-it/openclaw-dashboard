@@ -1661,6 +1661,41 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // POST /api/agent-send-message — 通过 openclaw CLI 发消息给 agent
+  // body: { agentId: string, message: string }
+  // ============================================
+  if (pathname === '/api/agent-send-message' && req.method === 'POST') {
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      try {
+        const { agentId, message } = JSON.parse(body)
+        if (!agentId || !message) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'agentId 和 message 必填' }))
+          return
+        }
+        // 后台启动 openclaw agent，不阻塞 HTTP 响应（agent 可能跑几十秒）
+        const child = spawn('openclaw', [
+          'agent',
+          '--agent', agentId,
+          '--message', message,
+          '--session-key', `agent:${agentId}:main`,
+        ], { detached: true, stdio: 'ignore' })
+        child.unref()
+        console.log(`[agent-send-message] dispatched to ${agentId}: ${message.slice(0, 80)}`)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, agentId, dispatched: true }))
+      } catch (e) {
+        console.error('[agent-send-message] Error:', e.message)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: e.message }))
+      }
+    })
+    return
+  }
+
+  // ============================================
   // GET /api/agent-crons — 获取所有 Agent 的定时任务
   // ============================================
   if (pathname === '/api/agent-crons' && req.method === 'GET') {
@@ -2559,6 +2594,833 @@ const server = http.createServer(async (req, res) => {
         platform: os.platform()
       }))
     }
+    return
+  }
+
+  // ============================================
+  // 计费配置：GET / POST /api/billing-config
+  // 存储在 ./billing-config.json（项目根目录），编辑后立即生效
+  // ============================================
+  const BILLING_CONFIG_PATH = path.join(__dirname, '..', 'billing-config.json')
+
+  // 内置主流 provider 默认值（人民币 / 100 万 token；以官方价格 + 6.5 汇率粗算）
+  const BILLING_DEFAULTS = {
+    version: 1,
+    models: {
+      'MiniMax-M2.7': {
+        mode: 'subscription_monthly',
+        monthlyCNY: 140,
+        quotaTokensPerMonth: 100000000,
+        note: 'MiniMax 包月套餐：固定月费 + token 配额',
+      },
+      'deepseek-v4-pro': {
+        mode: 'per_token',
+        inputPriceCNYPerMillion: 4,
+        outputPriceCNYPerMillion: 16,
+        discountFactor: 0.5,
+        discountStartHour: 0,
+        discountEndHour: 8,
+        note: 'DeepSeek：标准价 + 北京时间 00:00-08:00 半价',
+      },
+      'deepseek-v3': {
+        mode: 'per_token',
+        inputPriceCNYPerMillion: 1,
+        outputPriceCNYPerMillion: 2,
+        discountFactor: 0.5,
+        discountStartHour: 0,
+        discountEndHour: 8,
+        note: 'DeepSeek V3：低价位 + 夜间折扣',
+      },
+      'claude-sonnet-4-6': {
+        mode: 'per_token',
+        inputPriceCNYPerMillion: 21.6,
+        outputPriceCNYPerMillion: 108,
+        cacheReadPriceCNYPerMillion: 2.16,
+        cacheWritePriceCNYPerMillion: 27,
+        note: 'Anthropic Claude Sonnet 4.6 ($3/$15 per M token)',
+      },
+      'claude-opus-4': {
+        mode: 'per_token',
+        inputPriceCNYPerMillion: 108,
+        outputPriceCNYPerMillion: 540,
+        note: 'Claude Opus 4 ($15/$75 per M token)',
+      },
+      'gpt-4o': {
+        mode: 'per_token',
+        inputPriceCNYPerMillion: 18,
+        outputPriceCNYPerMillion: 72,
+        cacheReadPriceCNYPerMillion: 9,
+        note: 'OpenAI GPT-4o ($2.5/$10 per M token, prompt cache 50% off)',
+      },
+      'gpt-4o-mini': {
+        mode: 'per_token',
+        inputPriceCNYPerMillion: 1.08,
+        outputPriceCNYPerMillion: 4.32,
+        note: 'OpenAI GPT-4o-mini ($0.15/$0.6 per M token)',
+      },
+    },
+    fallback: {
+      mode: 'use_default',
+      note: '未在上方配置的模型，使用 OpenClaw 自带计费',
+    },
+  }
+
+  if (pathname === '/api/billing-config' && req.method === 'GET') {
+    try {
+      if (fsSync.existsSync(BILLING_CONFIG_PATH)) {
+        const raw = fsSync.readFileSync(BILLING_CONFIG_PATH, 'utf-8')
+        const cfg = JSON.parse(raw)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(cfg))
+      } else {
+        // 文件不存在 → 返回内置默认
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(BILLING_DEFAULTS))
+      }
+    } catch (e) {
+      console.error('[billing-config GET] error:', e.message)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message, ...BILLING_DEFAULTS }))
+    }
+    return
+  }
+
+  if (pathname === '/api/billing-config' && req.method === 'POST') {
+    let body = ''
+    req.on('data', c => { body += c })
+    req.on('end', () => {
+      try {
+        const cfg = JSON.parse(body)
+        if (!cfg || typeof cfg !== 'object' || !cfg.models) {
+          throw new Error('Invalid config: 必须包含 models 字段')
+        }
+        // 备份旧文件
+        if (fsSync.existsSync(BILLING_CONFIG_PATH)) {
+          fsSync.copyFileSync(BILLING_CONFIG_PATH, BILLING_CONFIG_PATH + '.bak')
+        }
+        fsSync.writeFileSync(BILLING_CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf-8')
+        console.log('[billing-config POST] saved, models:', Object.keys(cfg.models).length)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, path: BILLING_CONFIG_PATH }))
+      } catch (e) {
+        console.error('[billing-config POST] error:', e.message)
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: e.message }))
+      }
+    })
+    return
+  }
+
+  // GET /api/billing-config/defaults — 获取内置预设（用于"恢复默认"或新增模型时下拉选择）
+  if (pathname === '/api/billing-config/defaults' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(BILLING_DEFAULTS))
+    return
+  }
+
+  // ============================================
+  // GET /api/cost-summary  Sprint 1
+  // 返回：{ todayCNY, monthCNY, monthForecastCNY }
+  // 数据来源：~/.openclaw/agents/*/sessions/*.jsonl 的 mtime + cache 累计 cost
+  // ============================================
+  if (pathname === '/api/cost-summary' && req.method === 'GET') {
+    try {
+      const result = await collectUsageStats()
+      // 用 by-session jsonl mtime 聚合到日
+      const AGENTS_DIR_LOCAL = path.join(OPENCLAW_DIR, 'agents')
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+      const todayStartMs = today.getTime()
+      const monthStartMs = monthStart.getTime()
+      const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+      const dayOfMonth = today.getDate()
+
+      let todayCost = 0
+      let monthCost = 0
+      // 扫所有 agent 的 sessions，按文件 mtime 聚合
+      const agentDirs = fsSync.readdirSync(AGENTS_DIR_LOCAL).filter(d => {
+        try { return fsSync.statSync(path.join(AGENTS_DIR_LOCAL, d)).isDirectory() } catch { return false }
+      })
+      for (const agent of agentDirs) {
+        const sessionsDir = path.join(AGENTS_DIR_LOCAL, agent, 'sessions')
+        if (!fsSync.existsSync(sessionsDir)) continue
+        // 读 per-agent usage cache
+        const cacheByUuid = new Map()
+        try {
+          const cachePath = path.join(sessionsDir, '.usage-cost-cache.json')
+          if (fsSync.existsSync(cachePath)) {
+            const cacheData = JSON.parse(fsSync.readFileSync(cachePath, 'utf-8'))
+            for (const [filePath, entry] of Object.entries(cacheData.files || {})) {
+              if (entry?.totals) {
+                const basename = path.basename(filePath)
+                const uuid = extractSessionUuid(basename)
+                if (uuid) cacheByUuid.set(uuid, entry.totals.totalCost || 0)
+              }
+            }
+          }
+        } catch (e) { /* ignore */ }
+        const files = fsSync.readdirSync(sessionsDir).filter(f => isSessionFile(f))
+        for (const file of files) {
+          const fp = path.join(sessionsDir, file)
+          let stat
+          try { stat = fsSync.statSync(fp) } catch { continue }
+          if (stat.mtimeMs < monthStartMs) continue
+          const uuid = extractSessionUuid(file)
+          if (!uuid) continue
+          const cost = cacheByUuid.get(uuid) || 0
+          if (stat.mtimeMs >= todayStartMs) todayCost += cost
+          monthCost += cost
+        }
+      }
+
+      // 预估本月总费用：按当前已过天数线性外推
+      const monthForecast = dayOfMonth > 0 ? (monthCost / dayOfMonth) * daysInMonth : monthCost
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        todayCNY: todayCost,
+        monthCNY: monthCost,
+        monthForecastCNY: monthForecast,
+        daysInMonth,
+        dayOfMonth,
+        totalAllTime: result.totalCost,
+      }))
+    } catch (e) {
+      console.error('[cost-summary] error:', e.message)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message, todayCNY: 0, monthCNY: 0, monthForecastCNY: 0 }))
+    }
+    return
+  }
+
+  // ============================================
+  // 文件管理 API
+  // GET  /api/file-manager/tree      → 文件清单（带中文说明）
+  // POST /api/file-manager/read      → 读取文件内容（body: { path }）
+  // ============================================
+  const HOME = os.homedir()
+  // 把 ~ 替换为真实 home，并防穿越
+  function resolveSafePath(p) {
+    if (!p || typeof p !== 'string') throw new Error('invalid path')
+    if (p.includes('..')) throw new Error('path traversal not allowed')
+    let real = p
+    if (real.startsWith('~/')) real = path.join(HOME, real.slice(2))
+    if (real === '~') real = HOME
+    // 必须在白名单根目录下
+    const allowedRoots = [path.join(HOME, 'clawd'), path.join(HOME, '.openclaw')]
+    const ok = allowedRoots.some(r => real === r || real.startsWith(r + path.sep))
+    if (!ok) throw new Error('path outside allowed roots')
+    return real
+  }
+
+  /** 文件清单（带中文说明 + 谁在用） */
+  const FILE_MANIFEST = [
+    {
+      name: '🏠 工作车间',
+      rootDesc: '你的工作目录 ~/clawd/，可直接编辑',
+      groups: [
+        {
+          name: '顶层 Markdown 配置',
+          items: [
+            { path: '~/clawd/IDENTITY.md', cn: '身份卡', desc: '叶溪人设定义（名字、性格、背景）', usedBy: ['叶溪'] },
+            { path: '~/clawd/SOUL.md', cn: '灵魂书', desc: '核心价值观，所有 agent 共享的世界观', usedBy: ['全员'] },
+            { path: '~/clawd/USER.md', cn: '用户偏好', desc: '你（Allen）的个人偏好：称呼、语言、习惯', usedBy: ['全员'] },
+            { path: '~/clawd/AGENTS.md', cn: '工作规则', desc: '全局工作守则（中文回复、危险操作要审批等）', usedBy: ['全员'] },
+            { path: '~/clawd/TOOLS.md', cn: '工具注记', desc: '本机特有工具配置（不通用部分）', usedBy: ['全员'] },
+            { path: '~/clawd/HEARTBEAT.md', cn: '心跳清单', desc: '心跳任务扫描这个文件看有无事项（空 = 无事）', usedBy: ['叶溪'] },
+            { path: '~/clawd/MEMORY.md', cn: '长期记忆', desc: '重要事项备忘（项目历史、决策记录）', usedBy: ['全员'] },
+            { path: '~/clawd/skills-lock.json', cn: '技能锁文件', desc: '锁定技能版本（防意外升级）', usedBy: ['OpenClaw 启动校验'] },
+          ],
+        },
+        {
+          name: '子目录',
+          items: [
+            { path: '~/clawd/agents/pm/IDENTITY.md', cn: '怡雯人设', desc: '产品经理 怡雯的身份配置', usedBy: ['怡雯'] },
+            { path: '~/clawd/agents/developer/IDENTITY.md', cn: '瓦利人设', desc: '开发工程师 瓦利的身份配置', usedBy: ['瓦利'] },
+            { path: '~/clawd/agents/tester/IDENTITY.md', cn: '奥托人设', desc: '前端测试 奥托的身份配置', usedBy: ['奥托'] },
+            { path: '~/clawd/agents/inspector/IDENTITY.md', cn: '伯恩人设', desc: '巡检员 伯恩的身份配置', usedBy: ['伯恩'] },
+            { path: '~/clawd/agents/archivist/IDENTITY.md', cn: '小波人设', desc: '档案员 小波的身份配置', usedBy: ['小波'] },
+            { path: '~/clawd/agents/designer/IDENTITY.md', cn: '苏苏人设', desc: '美术设计师 苏苏的身份配置', usedBy: ['苏苏'] },
+            { path: '~/clawd/admin/cron-tasks.md', cn: '定时任务清单', desc: '所有 cron 任务的人类可读列表', usedBy: ['全员参考'] },
+            { path: '~/clawd/admin/change-log.md', cn: '变更日志', desc: '系统变更历史记录', usedBy: ['全员参考'] },
+            { path: '~/clawd/admin/work-reminders.md', cn: '工作提醒', desc: '待办事项与提醒', usedBy: ['inspector / pm'] },
+            { path: '~/clawd/admin/daily-task-summary-rule.md', cn: '日报生成规则', desc: '每日任务汇总脚本的规则', usedBy: ['archivist'] },
+            { path: '~/clawd/admin/format-spec.md', cn: '格式规范', desc: '消息、报告、文档的格式约定', usedBy: ['全员'] },
+            { path: '~/clawd/admin/calendar-events.md', cn: '日历事件', desc: '记录的重要日程事件', usedBy: ['pm'] },
+            { path: '~/clawd/admin/project-state.md', cn: '项目状态总览', desc: '所有项目的状态汇总（人读）', usedBy: ['pm / inspector'] },
+            { path: '~/clawd/admin/lark-cli-update-rule.md', cn: '飞书 CLI 升级规则', desc: 'lark CLI 自动升级的策略', usedBy: ['运维'] },
+            { path: '~/clawd/admin/openclaw-issue-mention-forwarding.md', cn: 'OpenClaw issue 草稿', desc: '准备提交给 OpenClaw 上游的 issue', usedBy: ['Allen'] },
+            { path: '~/clawd/admin/projects/README.md', cn: '项目档案说明', desc: 'projects/ 目录的说明文档', usedBy: ['查看者'] },
+            { path: '~/clawd/admin/projects/health-monitor/state.json', cn: '健康监控项目状态', desc: 'health-monitor 项目当前阶段', usedBy: ['inspector 扫描'] },
+            { path: '~/clawd/inspector/last_report.json', cn: '巡检最后报告', desc: '伯恩最后一次巡检的输出', usedBy: ['伯恩'] },
+            { path: '~/clawd/scripts/check-task-reminders.py', cn: '待办提醒脚本', desc: '每 5 分钟扫描即将开始的任务', usedBy: ['main 心跳调用'] },
+            { path: '~/clawd/scripts/gen-task-summary.py', cn: '任务汇总脚本', desc: '生成每日任务报告', usedBy: ['archivist'] },
+            { path: '~/clawd/scripts/archive-old-projects.py', cn: '项目归档脚本', desc: '归档完成 7 天以上的项目', usedBy: ['archivist'] },
+            { path: '~/clawd/scripts/inspect-projects.py', cn: '项目巡检脚本', desc: '扫描项目状态发现异常', usedBy: ['inspector'] },
+            { path: '~/clawd/scripts/send-group-msg.py', cn: '群消息发送', desc: '通过飞书 API 向群里发消息', usedBy: ['全员 cron'] },
+            { path: '~/clawd/scripts/update-project-state.py', cn: '项目状态更新', desc: '更新 admin/projects/*/state.json', usedBy: ['pm / dev'] },
+            { path: '~/clawd/memory', cn: '永久记忆库目录', desc: 'agent 长期记忆 markdown 文件', usedBy: ['全员'], isDir: true },
+          ],
+        },
+      ],
+    },
+    {
+      name: '⚙️ 设备机房',
+      rootDesc: 'OpenClaw 系统数据 ~/.openclaw/，不要手动改',
+      groups: [
+        {
+          name: '核心配置',
+          items: [
+            { path: '~/.openclaw/openclaw.json', cn: '总配置文件', desc: '所有 agent / 模型 / 技能 / 端口配置，最重要的一个', usedBy: ['OpenClaw Gateway'] },
+            { path: '~/.openclaw/exec-approvals.json', cn: '命令审批记录', desc: '你审批过的危险命令清单（避免重复问）', usedBy: ['Gateway exec policy'] },
+            { path: '~/.openclaw/update-check.json', cn: '升级检查', desc: '上次检查新版本的时间', usedBy: ['自动升级模块'] },
+            { path: '~/.openclaw/cron/jobs.json', cn: 'Cron 任务定义', desc: '所有定时任务的配置（最权威）', usedBy: ['cron 调度器'] },
+            { path: '~/.openclaw/identity/device.json', cn: '设备身份', desc: '本机在 OpenClaw 网络的身份信息', usedBy: ['Gateway'] },
+            { path: '~/.openclaw/devices/paired.json', cn: '设备配对', desc: '已配对的多设备列表', usedBy: ['跨设备同步'] },
+            { path: '~/.openclaw/credentials/feishu-pairing.json', cn: '飞书配对', desc: '飞书 bot 配对凭证（敏感）', usedBy: ['feishu 插件'], sensitive: true },
+            { path: '~/.openclaw/credentials/feishu-default-allowFrom.json', cn: '飞书白名单', desc: '允许哪些用户给 bot 发消息', usedBy: ['feishu 插件'], sensitive: true },
+          ],
+        },
+        {
+          name: '数据库 & 会话（不可读）',
+          items: [
+            { path: '~/.openclaw/memory/main.sqlite', cn: '叶溪记忆库', desc: 'main agent 的 SQLite 记忆数据库', usedBy: ['叶溪'], binary: true },
+            { path: '~/.openclaw/memory/pm.sqlite', cn: '怡雯记忆库', desc: '怡雯的 SQLite 记忆库', usedBy: ['怡雯'], binary: true },
+            { path: '~/.openclaw/memory/developer.sqlite', cn: '瓦利记忆库', desc: '瓦利的 SQLite 记忆库', usedBy: ['瓦利'], binary: true },
+            { path: '~/.openclaw/flows/registry.sqlite', cn: '工作流注册表', desc: '工作流编排引擎数据库', usedBy: ['flows 插件'], binary: true },
+            { path: '~/.openclaw/tasks/runs.sqlite', cn: '任务执行记录', desc: '所有任务运行历史', usedBy: ['任务系统'], binary: true },
+            { path: '~/.openclaw/agents/main/sessions', cn: '叶溪会话目录', desc: '5000+ 个 .jsonl 文件，所有对话历史', usedBy: ['叶溪 + Dashboard'], isDir: true, sensitive: true },
+          ],
+        },
+        {
+          name: '日志',
+          items: [
+            { path: '~/.openclaw/logs/gateway.log', cn: '网关主日志', desc: 'Gateway 运行日志', usedBy: ['debug'] },
+            { path: '~/.openclaw/logs/gateway.err.log', cn: '网关错误日志', desc: 'Gateway 异常和错误', usedBy: ['debug'] },
+            { path: '~/.openclaw/logs/commands.log', cn: '命令执行日志', desc: 'CLI 命令执行历史', usedBy: ['debug'] },
+            { path: '~/.openclaw/logs/config-health.json', cn: '配置健康检查', desc: 'openclaw.json 配置健康度', usedBy: ['Gateway'] },
+          ],
+        },
+      ],
+    },
+  ]
+
+  // 给清单填充实时元数据（大小、存在、mtime）
+  function enrichManifest() {
+    return FILE_MANIFEST.map(cat => ({
+      ...cat,
+      groups: cat.groups.map(g => ({
+        ...g,
+        items: g.items.map(item => {
+          try {
+            const real = resolveSafePath(item.path)
+            const stat = fsSync.statSync(real)
+            return {
+              ...item,
+              exists: true,
+              isDir: stat.isDirectory(),
+              size: stat.isFile() ? stat.size : null,
+              entries: stat.isDirectory() ? (fsSync.readdirSync(real).length) : null,
+              mtime: stat.mtimeMs,
+            }
+          } catch (e) {
+            return { ...item, exists: false }
+          }
+        }),
+      })),
+    }))
+  }
+
+  if (pathname === '/api/file-manager/tree' && req.method === 'GET') {
+    try {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ categories: enrichManifest() }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
+  // POST /api/file-manager/reveal — 用系统默认方式打开文件或在 Finder 显示
+  // body: { path, mode: 'open' | 'reveal' }
+  //   open    → 用默认 app 打开（文件→编辑器，目录→Finder）
+  //   reveal  → 在 Finder 中定位该文件（高亮显示）
+  if (pathname === '/api/file-manager/reveal' && req.method === 'POST') {
+    let body = ''
+    req.on('data', c => { body += c })
+    req.on('end', () => {
+      try {
+        const { path: p, mode } = JSON.parse(body)
+        const real = resolveSafePath(p)
+        const platform = os.platform()
+        let cmd, args
+        if (platform === 'darwin') {
+          if (mode === 'reveal') {
+            cmd = 'open'; args = ['-R', real]
+          } else {
+            cmd = 'open'; args = [real]
+          }
+        } else if (platform === 'win32') {
+          if (mode === 'reveal') {
+            cmd = 'explorer'; args = ['/select,', real]
+          } else {
+            cmd = 'explorer'; args = [real]
+          }
+        } else {
+          // linux: 用 xdg-open 打开文件，或打开父目录
+          if (mode === 'reveal') {
+            cmd = 'xdg-open'; args = [path.dirname(real)]
+          } else {
+            cmd = 'xdg-open'; args = [real]
+          }
+        }
+        const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
+        child.unref()
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, platform, mode, path: real }))
+      } catch (e) {
+        console.error('[file-manager/reveal] error:', e.message)
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: e.message }))
+      }
+    })
+    return
+  }
+
+  if (pathname === '/api/file-manager/read' && req.method === 'POST') {
+    let body = ''
+    req.on('data', c => { body += c })
+    req.on('end', () => {
+      try {
+        const { path: p } = JSON.parse(body)
+        const real = resolveSafePath(p)
+        const stat = fsSync.statSync(real)
+        if (stat.isDirectory()) {
+          // 目录 → 返回前 50 个子项
+          const list = fsSync.readdirSync(real).slice(0, 50)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ type: 'dir', entries: list, totalCount: fsSync.readdirSync(real).length }))
+          return
+        }
+        const MAX = 512 * 1024 // 512KB 上限
+        if (stat.size > MAX) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ type: 'too_large', size: stat.size, message: `文件 ${(stat.size / 1024).toFixed(1)} KB 超过 512KB 预览上限` }))
+          return
+        }
+        // 简单 binary 检测：扩展名或内容含 NUL
+        const ext = path.extname(real).toLowerCase()
+        const binaryExts = ['.sqlite', '.sqlite-shm', '.sqlite-wal', '.db', '.png', '.jpg', '.jpeg', '.gif', '.zip', '.tar', '.gz', '.exe', '.dylib']
+        if (binaryExts.includes(ext)) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ type: 'binary', size: stat.size, message: `二进制文件（${ext}）不支持预览` }))
+          return
+        }
+        const content = fsSync.readFileSync(real, 'utf-8')
+        if (content.includes('\x00')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ type: 'binary', size: stat.size, message: '检测到二进制内容（含 NUL 字节）' }))
+          return
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          type: 'text',
+          size: stat.size,
+          mtime: stat.mtimeMs,
+          ext,
+          content,
+        }))
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ type: 'error', error: e.message }))
+      }
+    })
+    return
+  }
+
+  // ============================================
+  // Sprint 4: 文件写入 API
+  // ============================================
+
+  // POST /api/file-manager/write — 写入文件（含自动备份）
+  if (pathname === '/api/file-manager/write' && req.method === 'POST') {
+    let body = ''
+    req.on('data', d => { body += d })
+    req.on('end', () => {
+      try {
+        const { path: p, content } = JSON.parse(body)
+        if (typeof content !== 'string') throw new Error('content must be string')
+        const MAX_WRITE = 512 * 1024
+        if (content.length > MAX_WRITE) throw new Error(`内容超过 512KB 上限（${(content.length/1024).toFixed(1)}KB）`)
+
+        // 可编辑扩展名白名单
+        const real = (function resolveSafePathInner(p2) {
+          if (!p2 || typeof p2 !== 'string') throw new Error('invalid path')
+          if (p2.includes('..')) throw new Error('path traversal not allowed')
+          let r = p2.startsWith('~/') ? path.join(os.homedir(), p2.slice(2)) : p2
+          const allowed = [path.join(os.homedir(), 'clawd'), path.join(os.homedir(), '.openclaw')]
+          if (!allowed.some(a => r === a || r.startsWith(a + path.sep))) throw new Error('path outside allowed roots')
+          return r
+        })(p)
+
+        const ext = path.extname(real).toLowerCase()
+        const editableExts = ['.md', '.json', '.py', '.txt', '.yaml', '.yml', '.sh', '.js', '.ts', '.env']
+        if (!editableExts.includes(ext)) throw new Error(`不允许编辑 ${ext} 类型文件`)
+
+        // 自动备份（仅文件存在时）
+        let backupPath = null
+        try {
+          if (fsSync.existsSync(real)) {
+            const ts = Date.now()
+            backupPath = `${real}.bak.${ts}`
+            fsSync.copyFileSync(real, backupPath)
+          }
+        } catch { /* 备份失败不影响写入 */ }
+
+        fsSync.mkdirSync(path.dirname(real), { recursive: true })
+        fsSync.writeFileSync(real, content, 'utf8')
+
+        // 检测是否 IDENTITY.md（建议 agent reset）
+        const isIdentity = path.basename(real) === 'IDENTITY.md'
+        let resetHint = null
+        if (isIdentity) {
+          // 从路径推断 agent id：~/clawd/agents/{id}/IDENTITY.md 或 ~/clawd/IDENTITY.md
+          const parts = real.split(path.sep)
+          const agentIdx = parts.indexOf('agents')
+          if (agentIdx >= 0 && parts[agentIdx + 1]) {
+            resetHint = parts[agentIdx + 1]
+          } else {
+            resetHint = 'main' // ~/clawd/IDENTITY.md 对应 main
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, backupPath, resetHint, writtenBytes: content.length }))
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: e.message }))
+      }
+    })
+    return
+  }
+
+  // ============================================
+  // Sprint 6: 费用时间线 API
+  // ============================================
+
+  // GET /api/cost-timeline?days=30 — 按天聚合 token + 费用
+  if (pathname === '/api/cost-timeline' && req.method === 'GET') {
+    try {
+      const days = Math.min(90, parseInt(new URL(req.url, 'http://localhost').searchParams.get('days') || '30', 10) || 30)
+      const now = Date.now()
+      const dayMs = 86400_000
+      const buckets = {}
+
+      // 初始化 days 个空桶
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(now - i * dayMs)
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+        buckets[key] = { date: key, tokens: 0, cost: 0, byModel: {} }
+      }
+
+      const agentsDir = path.join(os.homedir(), '.openclaw', 'agents')
+      const BILLING_DEFAULTS = { 'deepseek-v4-pro': 0.002, 'MiniMax-M2.7': 0.001, 'claude-sonnet-4-6': 0.004 }
+
+      let billingConfig = {}
+      try {
+        const bcPath = path.join(process.cwd(), 'billing-config.json')
+        billingConfig = JSON.parse(fsSync.readFileSync(bcPath, 'utf8'))
+      } catch { /* 使用默认 */ }
+
+      try {
+        const agentDirs = fsSync.readdirSync(agentsDir, { withFileTypes: true })
+          .filter(e => e.isDirectory()).map(e => e.name)
+
+        for (const agentId of agentDirs) {
+          // 优先读 .usage-cost-cache.json（轻量）
+          const cacheFile = path.join(agentsDir, agentId, 'sessions', '.usage-cost-cache.json')
+          try {
+            const cache = JSON.parse(fsSync.readFileSync(cacheFile, 'utf8'))
+            // cache 有 dailyUsage 字段（如果有的话）
+            if (cache.dailyUsage) {
+              for (const [dateKey, usage] of Object.entries(cache.dailyUsage)) {
+                if (buckets[dateKey]) {
+                  buckets[dateKey].tokens += (usage.totalTokens || 0)
+                  buckets[dateKey].cost += (usage.totalCost || 0)
+                }
+              }
+              continue
+            }
+          } catch { /* 没有缓存，改扫 jsonl */ }
+
+          // 扫 session jsonl 文件
+          const sessionsDir = path.join(agentsDir, agentId, 'sessions')
+          let sessionFiles = []
+          try { sessionFiles = fsSync.readdirSync(sessionsDir).filter(f => f.endsWith('.jsonl') && !f.startsWith('.')) } catch { continue }
+
+          for (const sf of sessionFiles) {
+            const sfPath = path.join(sessionsDir, sf)
+            try {
+              const stat = fsSync.statSync(sfPath)
+              // 只扫 days 天内修改的文件
+              if (now - stat.mtimeMs > days * dayMs + dayMs) continue
+              const lines = fsSync.readFileSync(sfPath, 'utf8').split('\n').filter(Boolean)
+              for (const line of lines) {
+                try {
+                  const entry = JSON.parse(line)
+                  // 寻找 usage 类型条目
+                  const ts = entry.ts || entry.timestamp || entry.created_at
+                  if (!ts) continue
+                  const d = new Date(ts)
+                  const dateKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+                  if (!buckets[dateKey]) continue
+
+                  // 多种格式兼容
+                  let tokens = 0, cost = 0, model = ''
+                  if (entry.type === 'usage' || entry.usage) {
+                    const u = entry.usage || entry
+                    tokens = (u.input_tokens || u.inputTokens || 0) + (u.output_tokens || u.outputTokens || 0)
+                    model = u.model || entry.model || ''
+                    cost = u.cost || 0
+                  } else if (entry.type === 'message' && entry.usage) {
+                    tokens = (entry.usage.input_tokens || 0) + (entry.usage.output_tokens || 0)
+                    model = entry.model || ''
+                  } else { continue }
+
+                  if (tokens === 0) continue
+                  if (!cost && model) {
+                    const rate = billingConfig[model]?.ratePerKToken
+                      || BILLING_DEFAULTS[model] || 0.002
+                    cost = (tokens / 1000) * rate
+                  }
+                  buckets[dateKey].tokens += tokens
+                  buckets[dateKey].cost += cost
+                } catch { /* 跳过单行异常 */ }
+              }
+            } catch { /* 跳过文件错误 */ }
+          }
+        }
+      } catch { /* agentsDir 不存在 */ }
+
+      const timeline = Object.values(buckets)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ timeline, days, generatedAt: Date.now() }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message, timeline: [] }))
+    }
+    return
+  }
+
+  // ============================================
+  // Sprint 2: 项目看板 API
+  // ============================================
+
+  // GET /api/projects/list — 扫描 ~/clawd/admin/projects/*/state.json
+  if (pathname === '/api/projects/list' && req.method === 'GET') {
+    try {
+      const projectsDir = path.join(os.homedir(), 'clawd', 'admin', 'projects')
+      const projects = []
+      try {
+        const entries = fsSync.readdirSync(projectsDir, { withFileTypes: true })
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue
+          const stateFile = path.join(projectsDir, entry.name, 'state.json')
+          try {
+            const raw = fsSync.readFileSync(stateFile, 'utf8')
+            const state = JSON.parse(raw)
+            const stat = fsSync.statSync(stateFile)
+            projects.push({
+              id: entry.name,
+              name: state.name || state.project_name || entry.name,
+              phase: state.phase || 'unknown',
+              responsible_agent: state.responsible_agent || state.agent || null,
+              blocked_reason: state.blocked_reason || null,
+              retry_count: state.retry_count || 0,
+              updated_at: state.updated_at || null,
+              created_at: state.created_at || null,
+              file_mtime: stat.mtimeMs,
+              raw: state,
+            })
+          } catch { /* 跳过无法解析的 */ }
+        }
+      } catch { /* 目录不存在 */ }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ projects, total: projects.length, checkedAt: Date.now() }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message, projects: [] }))
+    }
+    return
+  }
+
+  // GET /api/projects/state?id=xxx — 返回单个项目 state.json 全文
+  if (pathname === '/api/projects/state' && req.method === 'GET') {
+    try {
+      const id = new URL(req.url, 'http://localhost').searchParams.get('id')
+      if (!id || !/^[a-zA-Z0-9_\-]+$/.test(id)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid id' }))
+        return
+      }
+      const stateFile = path.join(os.homedir(), 'clawd', 'admin', 'projects', id, 'state.json')
+      const raw = fsSync.readFileSync(stateFile, 'utf8')
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(raw)
+    } catch (e) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
+  // ============================================
+  // Sprint 3: Cron 任务中心 API
+  // ============================================
+
+  // GET /api/cron/list — 读取 cron jobs + 最近执行记录
+  if (pathname === '/api/cron/list' && req.method === 'GET') {
+    try {
+      const cronDir = path.join(os.homedir(), '.openclaw', 'cron')
+      const jobsFile = path.join(cronDir, 'jobs.json')
+      const stateFile = path.join(cronDir, 'jobs-state.json')
+      const runsDir = path.join(cronDir, 'runs')
+
+      let jobs = []
+      try {
+        const raw = fsSync.readFileSync(jobsFile, 'utf8')
+        const parsed = JSON.parse(raw)
+        jobs = Array.isArray(parsed) ? parsed : (parsed.jobs || [])
+      } catch { /* jobs.json 不存在或格式异常 */ }
+
+      // 读取 jobs-state.json（含 nextRunAtMs / lastRunStatus）
+      let jobsState = {}
+      try {
+        const stateRaw = fsSync.readFileSync(stateFile, 'utf8')
+        jobsState = JSON.parse(stateRaw).jobs || {}
+      } catch { /* 忽略 */ }
+
+      // 为每个 job 读取最近 10 条执行记录（jsonl 格式）
+      const jobsWithRuns = jobs.map(job => {
+        const jobId = job.id || job.name
+        const state = jobsState[jobId] || {}
+        let runs = []
+        try {
+          const runFile = path.join(runsDir, `${jobId}.jsonl`)
+          const lines = fsSync.readFileSync(runFile, 'utf8').trim().split('\n').filter(Boolean)
+          runs = lines.slice(-10).reverse().map(l => {
+            try { return JSON.parse(l) } catch { return null }
+          }).filter(Boolean)
+        } catch { /* 没有执行记录 */ }
+
+        const failCount = runs.filter(r => r && (r.status === 'error' || r.status === 'failed')).length
+        const consecutiveErrors = (state.state || {}).consecutiveErrors || 0
+        const lastRun = runs[0] ? {
+          status: runs[0].status,
+          startedAt: runs[0].ts ? new Date(runs[0].ts).toISOString() : null,
+          durationMs: runs[0].durationMs,
+          message: runs[0].summary || runs[0].message || null,
+          error: runs[0].status === 'error' ? (runs[0].summary || runs[0].error || null) : null,
+        } : ((state.state || {}).lastRunAtMs ? {
+          status: (state.state || {}).lastRunStatus || 'ok',
+          startedAt: new Date((state.state || {}).lastRunAtMs).toISOString(),
+          durationMs: (state.state || {}).lastDurationMs,
+        } : null)
+
+        return {
+          ...job,
+          runs: runs.map(r => ({
+            status: r.status,
+            startedAt: r.ts ? new Date(r.ts).toISOString() : null,
+            durationMs: r.durationMs,
+            message: r.summary || null,
+            error: r.status === 'error' ? (r.summary || r.error || null) : null,
+          })),
+          failCount: Math.max(failCount, consecutiveErrors),
+          lastRun,
+          nextRunAtMs: (state.state || {}).nextRunAtMs || null,
+        }
+      })
+
+      // 失败 >=3 次排最前
+      jobsWithRuns.sort((a, b) => {
+        const aFail = (a.failCount || 0) >= 3
+        const bFail = (b.failCount || 0) >= 3
+        if (aFail && !bFail) return -1
+        if (!aFail && bFail) return 1
+        return 0
+      })
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ jobs: jobsWithRuns, total: jobsWithRuns.length, checkedAt: Date.now() }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message, jobs: [] }))
+    }
+    return
+  }
+
+  // POST /api/cron/trigger — 立即触发一个 cron job
+  if (pathname === '/api/cron/trigger' && req.method === 'POST') {
+    let body = ''
+    req.on('data', d => { body += d })
+    req.on('end', () => {
+      try {
+        const { id } = JSON.parse(body)
+        if (!id) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'id required' })); return }
+        const cp = require('child_process')
+        cp.exec(`openclaw cron trigger --id "${id}"`, { timeout: 10000 }, (err, stdout, stderr) => {
+          if (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: err.message, stderr }))
+          } else {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: true, stdout }))
+          }
+        })
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: e.message }))
+      }
+    })
+    return
+  }
+
+  // POST /api/cron/pause — 暂停 cron job
+  if (pathname === '/api/cron/pause' && req.method === 'POST') {
+    let body = ''
+    req.on('data', d => { body += d })
+    req.on('end', () => {
+      try {
+        const { id } = JSON.parse(body)
+        if (!id) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'id required' })); return }
+        const cp = require('child_process')
+        cp.exec(`openclaw cron pause --id "${id}"`, { timeout: 10000 }, (err, stdout, stderr) => {
+          if (err) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message, stderr })) }
+          else { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true })) }
+        })
+      } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })) }
+    })
+    return
+  }
+
+  // POST /api/cron/resume — 恢复 cron job
+  if (pathname === '/api/cron/resume' && req.method === 'POST') {
+    let body = ''
+    req.on('data', d => { body += d })
+    req.on('end', () => {
+      try {
+        const { id } = JSON.parse(body)
+        if (!id) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'id required' })); return }
+        const cp = require('child_process')
+        cp.exec(`openclaw cron resume --id "${id}"`, { timeout: 10000 }, (err, stdout, stderr) => {
+          if (err) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message, stderr })) }
+          else { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true })) }
+        })
+      } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })) }
+    })
     return
   }
 

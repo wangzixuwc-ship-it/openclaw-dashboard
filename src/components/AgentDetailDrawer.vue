@@ -3,9 +3,17 @@
     :close-on-click-modal="true" :z-index="3000">
     <template #header>
       <div class="drawer-title">
-        <el-icon :size="20" :class="statusColorClass">
-          <component :is="drawerAvatarIcon" />
-        </el-icon>
+        <div class="drawer-avatar" :class="statusColorClass">
+          <img
+            v-if="drawerAvatarSrc"
+            :src="drawerAvatarSrc"
+            :alt="displayAgentName"
+            class="drawer-avatar-img"
+            @error="onDrawerAvatarError"
+          />
+          <span v-else-if="agent?.emoji" class="drawer-avatar-emoji">{{ agent.emoji }}</span>
+          <el-icon v-else :size="18"><component :is="drawerAvatarIcon" /></el-icon>
+        </div>
         <span class="title-text">{{ displayAgentName }}</span>
         <el-tag :type="statusTagType" :effect="agent?.status === 'running' ? 'dark' : 'light'" size="small"
           class="status-badge">
@@ -70,38 +78,53 @@
                     <el-icon><Collection /></el-icon>
                     <span>暂无技能数据</span>
                   </div>
-                  <div v-else class="skills-panel-grid">
-                    <div
-                      v-for="skill in drawerSkillsEnriched"
-                      :key="skill.name"
-                      :class="['sp-item', skill.enabled ? 'sp-on' : skill.installed ? 'sp-inactive' : 'sp-off']"
-                    >
-                      <span
-                        :class="['sp-dot', skill.enabled ? 'sp-dot--on' : skill.installed ? 'sp-dot--inactive' : 'sp-dot--off']"
-                        :title="skill.enabled ? '已激活' : skill.installed ? '已安装，未激活' : '未安装'"
-                      />
-                      <span class="sp-name-wrap">
-                        <span class="sp-name">{{ skill.displayName }}</span>
-                        <span v-if="skill.description" class="sp-desc" :title="skill.description">{{ skill.description }}</span>
-                      </span>
-                      <el-button
-                        v-if="skill.installed && skill.enabled"
-                        size="small" type="danger" plain
-                        :loading="drawerSkillsToggling.get(skill.name)"
-                        :disabled="drawerSkillsToggling.get(skill.name)"
-                        @click="handleDrawerSkillToggle(skill.name, false)"
-                        class="sp-btn"
-                      >禁用</el-button>
-                      <el-button
-                        v-else-if="skill.installed && !skill.enabled"
-                        size="small" type="success" plain
-                        :loading="drawerSkillsToggling.get(skill.name)"
-                        :disabled="drawerSkillsToggling.get(skill.name)"
-                        @click="handleDrawerSkillToggle(skill.name, true)"
-                        class="sp-btn"
-                      >启用</el-button>
-                      <span v-else class="sp-uninstalled">未装</span>
-                    </div>
+                  <div v-else class="skills-panel-grouped">
+                    <template v-for="(group, catName) in drawerSkillsByCategory" :key="catName">
+                      <!-- 分类标题（可折叠） -->
+                      <div
+                        class="sp-cat-header"
+                        @click="toggleDrawerCat(String(catName))"
+                      >
+                        <span class="sp-cat-icon">{{ DRAWER_CATEGORY_ICONS[String(catName)] || '📦' }}</span>
+                        <span class="sp-cat-name">{{ catName }}</span>
+                        <span class="sp-cat-count">{{ group.length }}</span>
+                        <span class="sp-cat-chevron" :class="{ collapsed: collapsedDrawerCats.has(String(catName)) }">▾</span>
+                      </div>
+                      <!-- 技能列表 -->
+                      <div v-show="!collapsedDrawerCats.has(String(catName))" class="skills-panel-grid">
+                        <div
+                          v-for="skill in group"
+                          :key="skill.name"
+                          :class="['sp-item', skill.enabled ? 'sp-on' : skill.installed ? 'sp-inactive' : 'sp-off']"
+                        >
+                          <span
+                            :class="['sp-dot', skill.enabled ? 'sp-dot--on' : skill.installed ? 'sp-dot--inactive' : 'sp-dot--off']"
+                            :title="skill.enabled ? '已激活' : skill.installed ? '已安装，未激活' : '未安装'"
+                          />
+                          <span class="sp-name-wrap">
+                            <span class="sp-name">{{ skill.displayName }}</span>
+                            <span v-if="skill.description" class="sp-desc" :title="skill.description">{{ skill.description }}</span>
+                          </span>
+                          <el-button
+                            v-if="skill.installed && skill.enabled"
+                            size="small" type="danger" plain
+                            :loading="drawerSkillsToggling.get(skill.name)"
+                            :disabled="drawerSkillsToggling.get(skill.name)"
+                            @click="handleDrawerSkillToggle(skill.name, false)"
+                            class="sp-btn"
+                          >禁用</el-button>
+                          <el-button
+                            v-else-if="skill.installed && !skill.enabled"
+                            size="small" type="success" plain
+                            :loading="drawerSkillsToggling.get(skill.name)"
+                            :disabled="drawerSkillsToggling.get(skill.name)"
+                            @click="handleDrawerSkillToggle(skill.name, true)"
+                            class="sp-btn"
+                          >启用</el-button>
+                          <span v-else class="sp-uninstalled">未装</span>
+                        </div>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </transition>
@@ -164,6 +187,18 @@
 
             <!-- 发送区域 -->
             <div class="chat-send-area" @paste="handlePaste">
+              <!-- 快捷模板 -->
+              <div class="quick-tpl-bar">
+                <span class="quick-tpl-label">快捷：</span>
+                <el-button
+                  v-for="tpl in quickTemplates"
+                  :key="tpl.label"
+                  size="small"
+                  text
+                  class="quick-tpl-btn"
+                  @click="applyTemplate(tpl.text)"
+                >{{ tpl.label }}</el-button>
+              </div>
               <!-- 粘贴的图片预览 -->
               <div v-if="imageAttachments.length > 0" class="image-preview-strip">
                 <div v-for="(img, idx) in imageAttachments" :key="idx" class="image-preview-item">
@@ -174,6 +209,7 @@
               </div>
               <div class="send-row">
                 <el-input v-model="chatInput" type="textarea" :rows="2"
+                  ref="chatInputRef"
                   placeholder="输入消息... (Enter 发送，Ctrl+Enter 换行，支持粘贴图片)" :disabled="sending"
                   @keydown="handleInputKeydown" />
                 <el-button type="primary" :icon="Promotion" :loading="sending" :disabled="sending" @click="sendMessage">
@@ -194,6 +230,7 @@
 
         <!-- ========= 右侧：会话信息 + 上下文使用 + 操作 ========= -->
         <div class="drawer-right">
+        <el-scrollbar class="drawer-right-scroll" view-class="drawer-right-scroll-view">
 
           <!-- 实时活动（运行中时显示） -->
           <el-card v-if="agent.status === 'running'" class="detail-section live-activity-card" shadow="never">
@@ -208,7 +245,7 @@
                 </span>
               </div>
             </template>
-            <div class="drawer-live-steps">
+            <div class="drawer-live-steps" ref="liveStepsEl">
               <div v-if="drawerLiveLoading && drawerLiveSteps.length === 0" class="drawer-live-empty">
                 <el-icon class="is-loading"><Loading /></el-icon> 加载中…
               </div>
@@ -376,15 +413,35 @@
             <pre class="raw-details">{{ JSON.stringify(agent.details, null, 2) }}</pre>
           </el-card>
 
-          <!-- Action Buttons -->
-          <div class="action-bar">
-            <el-button type="danger" :icon="Refresh" @click="handleResetSession" :loading="resetting">
-              重置会话
-            </el-button>
-            <el-button :icon="View" @click="loadHistory()" :loading="loadingHistory">
-              加载历史
-            </el-button>
-          </div>
+        </el-scrollbar>
+
+        <!-- Action Buttons（不参与滚动，固定在右下） -->
+        <div class="action-bar action-bar--sticky">
+          <!-- Agent 控制按钮 -->
+          <el-tooltip content="重载 agent 配置（等同 --reset）" placement="top">
+            <el-button
+              size="small"
+              :icon="RefreshRight"
+              :loading="agentControlling === 'restart'"
+              @click="agentControl('restart')"
+            >重启</el-button>
+          </el-tooltip>
+          <el-tooltip content="临时停止接收消息（省 token）" placement="top">
+            <el-button
+              size="small"
+              :icon="VideoPause"
+              :loading="agentControlling === 'pause'"
+              @click="agentControl('pause')"
+            >暂停</el-button>
+          </el-tooltip>
+          <div class="action-bar-spacer" />
+          <el-button type="danger" :icon="Refresh" @click="handleResetSession" :loading="resetting">
+            重置会话
+          </el-button>
+          <el-button :icon="View" @click="loadHistory()" :loading="loadingHistory">
+            历史
+          </el-button>
+        </div>
         </div>
       </div>
     </template>
@@ -428,6 +485,8 @@ import {
   Promotion,
   Link,
   ArrowDown,
+  RefreshRight,
+  VideoPause,
 } from '@element-plus/icons-vue'
 
 interface MessageItem {
@@ -440,7 +499,10 @@ interface MessageItem {
 const props = defineProps<{
   visible: boolean
   agentData: AgentInfo | null
+  autoFocusInput?: boolean
 }>()
+
+const chatInputRef = ref<any>(null)
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
@@ -467,6 +529,54 @@ const loadingHistory = ref(false)
 const resetting = ref(false)
 const showSkillsPanel = ref(false)
 const showCronPanel = ref(false)
+
+// ── Sprint 5: Agent 控制 + 快捷模板 ──
+const agentControlling = ref<string | null>(null)
+
+async function agentControl(action: 'restart' | 'pause') {
+  const agentId = agent.value?.key?.split(':')[1]
+  if (!agentId) return
+  agentControlling.value = action
+  try {
+    if (action === 'restart') {
+      // 用 /reset 消息触发 agent 重载
+      const resp = await fetch('/api/agent-send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId, message: '/reset' }),
+      })
+      const data = await resp.json()
+      if (data.ok !== false) ElMessage.success('已发送重载指令，Agent 将重启配置')
+      else ElMessage.error(data.error || '重启失败')
+    } else {
+      ElMessage.info('暂停功能需要 openclaw CLI 支持，当前版本暂不可用')
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    agentControlling.value = null
+  }
+}
+
+// 快捷模板（从 localStorage 读取，可扩展）
+const DEFAULT_TEMPLATES = [
+  { label: '整理今日待办', text: '请帮我整理今日待办事项，列出优先级' },
+  { label: '立即巡检', text: '立即执行一次项目巡检，报告所有异常' },
+  { label: '归档完成项目', text: '检查并归档所有已完成超过 7 天的项目' },
+]
+
+const quickTemplates = computed(() => {
+  try {
+    const saved = localStorage.getItem('quick_templates_v1')
+    if (saved) return JSON.parse(saved)
+  } catch { /* ignore */ }
+  return DEFAULT_TEMPLATES
+})
+
+function applyTemplate(text: string) {
+  chatInput.value = text
+  nextTick(() => chatInputRef.value?.focus?.())
+}
 
 // Chat send
 const chatInput = ref('')
@@ -594,6 +704,30 @@ const drawerAgentId = computed(() => {
   return (parts[0] === 'agent' && parts.length >= 2) ? parts[1] : parts[0]
 })
 
+// ── Drawer 头像：优先 env > .jpg > .png > emoji > 默认图标 ──
+const drawerEnvAvatar = computed(() => {
+  const idUpper = drawerAgentId.value.replace(/-/g, '_').toUpperCase()
+  const envKey = `VITE_AGENT_${idUpper}_AVATAR`
+  return (import.meta.env as Record<string, string>)[envKey] || ''
+})
+const drawerAvatarJpgFailed = ref(false)
+const drawerAvatarPngFailed = ref(false)
+watch(drawerAgentId, () => {
+  drawerAvatarJpgFailed.value = false
+  drawerAvatarPngFailed.value = false
+})
+const drawerAvatarSrc = computed(() => {
+  if (drawerEnvAvatar.value) return drawerEnvAvatar.value
+  if (!drawerAgentId.value) return ''
+  if (!drawerAvatarJpgFailed.value) return `/avatars/${drawerAgentId.value}.jpg`
+  if (!drawerAvatarPngFailed.value) return `/avatars/${drawerAgentId.value}.png`
+  return ''
+})
+function onDrawerAvatarError() {
+  if (!drawerAvatarJpgFailed.value) drawerAvatarJpgFailed.value = true
+  else drawerAvatarPngFailed.value = true
+}
+
 const agentHistoricalTokens = computed(() => store.getAgentHistoricalTokens(drawerAgentId.value))
 
 // ════════════════════════════════════════════════
@@ -609,6 +743,14 @@ interface DrawerLiveStep {
 const drawerLiveSteps = ref<DrawerLiveStep[]>([])
 const drawerLiveLoading = ref(false)
 let drawerLiveTimer: ReturnType<typeof setInterval> | null = null
+const liveStepsEl = ref<HTMLElement | null>(null)
+
+function scrollLiveToBottom() {
+  nextTick(() => {
+    const el = liveStepsEl.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
 
 async function fetchDrawerLiveActivity() {
   if (agent.value?.status !== 'running') return
@@ -616,7 +758,11 @@ async function fetchDrawerLiveActivity() {
     const resp = await fetch(`/api/agent-live-activity?agent=${drawerAgentId.value}`)
     if (resp.ok) {
       const data = await resp.json()
-      drawerLiveSteps.value = data.steps || []
+      const newSteps = data.steps || []
+      // 只在步骤数量变化时滚底，避免滚动抖动
+      const needsScroll = newSteps.length !== drawerLiveSteps.value.length
+      drawerLiveSteps.value = newSteps
+      if (needsScroll) scrollLiveToBottom()
     }
   } catch { /* 静默 */ }
   drawerLiveLoading.value = false
@@ -691,6 +837,39 @@ function formatTokens(n: number): string {
 }
 
 // ── 专属技能（读取 agents-configured + skills） ──────────────────────────────
+const DRAWER_SKILL_CATEGORIES: Record<string, string[]> = {
+  '飞书协作': [
+    'lark-im', 'lark-task', 'lark-calendar', 'lark-doc', 'lark-wiki',
+    'lark-base', 'lark-sheets', 'lark-drive', 'lark-contact', 'lark-mail',
+    'lark-approval', 'lark-attendance', 'lark-event', 'lark-minutes', 'lark-okr',
+    'lark-slides', 'lark-vc', 'lark-vc-agent', 'lark-whiteboard', 'lark-shared',
+    'lark-apps', 'lark-markdown', 'lark-workflow-meeting-summary', 'lark-workflow-standup-report',
+    'lark-openapi-explorer', 'lark-skill-maker',
+    'feishu-toolkit', 'feishu-doc', 'feishu-wiki', 'feishu-drive', 'feishu-perm',
+    'jw-feishu-suite', 'Feishu All-in-One',
+  ],
+  '开发工具': ['browser-automation', 'python-debugpy', 'node-inspect-debugger', 'spike'],
+  '生产力工具': ['diagram-maker', 'canvas', 'weather', 'apple-notes', 'apple-reminders', 'Feishu Task Daily Summary'],
+  '系统与安全': ['1password', 'healthcheck'],
+}
+const DRAWER_CATEGORY_ICONS: Record<string, string> = {
+  '飞书协作': '🐦', '开发工具': '🔧', '生产力工具': '⚡', '系统与安全': '🔒', '其他': '📦',
+}
+function getDrawerSkillCategory(name: string): string {
+  for (const [cat, list] of Object.entries(DRAWER_SKILL_CATEGORIES)) {
+    if (list.includes(name)) return cat
+  }
+  return '其他'
+}
+
+// 内联技能面板折叠状态
+const collapsedDrawerCats = ref<Set<string>>(new Set())
+function toggleDrawerCat(cat: string) {
+  const s = new Set(collapsedDrawerCats.value)
+  s.has(cat) ? s.delete(cat) : s.add(cat)
+  collapsedDrawerCats.value = s
+}
+
 const SKILL_DISPLAY_NAMES: Record<string, string> = {
   'lark-im': '飞书即时通讯', 'lark-task': '飞书任务', 'lark-calendar': '飞书日历',
   'lark-doc': '飞书文档', 'lark-wiki': '飞书知识库', 'lark-base': '飞书多维表格',
@@ -730,6 +909,22 @@ const drawerSkillsEnriched = computed<DrawerSkill[]>(() => {
       description: info?.description || '',
     }
   })
+})
+
+/** 内联技能面板按分类分组 */
+const drawerSkillsByCategory = computed<Record<string, DrawerSkill[]>>(() => {
+  const catOrder = Object.keys(DRAWER_SKILL_CATEGORIES).concat(['其他'])
+  const result: Record<string, DrawerSkill[]> = {}
+  for (const cat of catOrder) result[cat] = []
+  for (const skill of drawerSkillsEnriched.value) {
+    const cat = getDrawerSkillCategory(skill.name)
+    if (!result[cat]) result[cat] = []
+    result[cat].push(skill)
+  }
+  for (const cat of catOrder) {
+    if (result[cat].length === 0) delete result[cat]
+  }
+  return result
 })
 
 async function fetchDrawerSkills(): Promise<void> {
@@ -1362,6 +1557,15 @@ watch(drawerVisible, (val) => {
         loadHistory(true, wasAtBottom) // 静默刷新，仅在用户已在底部时保持底部
       }
     }, 3000)
+    // 双击进会话时聚焦输入框
+    if (props.autoFocusInput) {
+      nextTick(() => {
+        setTimeout(() => {
+          const el = chatInputRef.value?.textarea || chatInputRef.value?.input
+          if (el && typeof el.focus === 'function') el.focus()
+        }, 250)
+      })
+    }
   } else if (!val) {
     // 关闭抽屉时停止刷新，收起技能面板
     if (refreshTimer !== null) {
@@ -1399,6 +1603,28 @@ watch(recentMessages, () => {
   align-items: center;
   gap: 10px;
   color: var(--text-primary);
+}
+
+/* ── Drawer 头像（头部标题左侧的圆头像，复用 AgentCard 的样式风格）── */
+.drawer-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.drawer-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.drawer-avatar-emoji {
+  font-size: 16px;
+  line-height: 1;
 }
 
 .title-text {
@@ -1491,10 +1717,80 @@ watch(recentMessages, () => {
 .drawer-right {
   width: 340px;
   flex-shrink: 0;
-  align-self: flex-start;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 底部操作栏：不参与滚动，固定在右侧面板底部 */
+.action-bar--sticky {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+.action-bar--sticky .el-button {
+  flex: 1;
+  min-width: 60px;
+}
+.action-bar-spacer {
+  flex: 1;
+  min-width: 4px;
+}
+
+/* 快捷模板栏 */
+.quick-tpl-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 4px 4px 4px 0;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.quick-tpl-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.quick-tpl-btn {
+  font-size: 11px !important;
+  color: var(--text-secondary) !important;
+  padding: 2px 6px !important;
+  height: auto !important;
+  border-radius: 4px !important;
+  transition: all 0.15s !important;
+}
+.quick-tpl-btn:hover {
+  color: var(--accent) !important;
+  background: rgba(56,189,248,0.08) !important;
+}
+
+/* el-scrollbar 占满 .drawer-right 的全部高度 */
+.drawer-right :deep(.drawer-right-scroll),
+.drawer-right :deep(.el-scrollbar) {
+  flex: 1;
+  height: 100%;
+}
+/* 视图区是 flex 列，让所有卡片像之前一样竖排 */
+.drawer-right :deep(.drawer-right-scroll-view) {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding-right: 4px;
+}
+
+/* 强制右侧面板内所有 el-card 及其子元素不产生纵向内部滚动 */
+.drawer-right :deep(.el-card),
+.drawer-right :deep(.el-card__header),
+.drawer-right :deep(.el-card__body) {
+  overflow-y: visible !important;
+  max-height: none !important;
 }
 
 .detail-section {
@@ -1816,9 +2112,9 @@ watch(recentMessages, () => {
   line-height: 1.5;
   overflow-x: auto;
   margin: 0;
-  max-height: 200px;
-  overflow-y: auto;
   color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ── 历史 Token 明细 ── */
@@ -2339,8 +2635,8 @@ watch(recentMessages, () => {
 /* 过渡动画 */
 .skills-panel-enter-active,
 .skills-panel-leave-active {
-  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
-  max-height: 260px;
+  transition: max-height 0.28s ease, opacity 0.2s ease, padding 0.25s ease;
+  max-height: 480px;
 }
 .skills-panel-enter-from,
 .skills-panel-leave-to {
@@ -2369,14 +2665,47 @@ watch(recentMessages, () => {
   opacity: 0.75;
 }
 
+/* 分组容器 */
+.skills-panel-grouped {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* 分类标题行 */
+.sp-cat-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 4px 5px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  margin-top: 4px;
+}
+.sp-cat-header:first-child { margin-top: 0; }
+.sp-cat-header:hover { background: rgba(255,255,255,0.03); border-radius: 4px; }
+.sp-cat-icon { font-size: 13px; }
+.sp-cat-name { font-size: 12px; font-weight: 700; color: var(--text-primary); flex: 1; }
+.sp-cat-count {
+  font-size: 10px; color: var(--text-secondary);
+  background: rgba(255,255,255,0.07); border-radius: 8px;
+  padding: 0 6px; height: 16px; line-height: 16px;
+}
+.sp-cat-chevron {
+  font-size: 12px; color: var(--text-secondary);
+  transition: transform 0.2s;
+  display: inline-block;
+}
+.sp-cat-chevron.collapsed { transform: rotate(-90deg); }
+
 /* 技能条目网格：两列 */
 .skills-panel-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 3px 8px;
-  max-height: 220px;
-  overflow-y: auto;
-  scrollbar-width: thin;
+  padding: 4px 0 6px;
+  overflow: visible;
 }
 
 .sp-item {

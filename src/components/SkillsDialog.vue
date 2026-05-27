@@ -96,12 +96,13 @@
           <el-empty description="该 Agent 暂未配置技能" :image-size="60" />
         </div>
         <template v-else v-for="(group, catName) in selectedAgentSkillsByCategory" :key="catName">
-          <div class="category-header">
+          <div class="category-header" @click="toggleCatAgent(String(catName))">
             <span class="category-icon">{{ getCategoryIcon(catName) }}</span>
             <span class="category-name">{{ catName }}</span>
             <span class="category-count">{{ group.length }}</span>
+            <span class="category-chevron" :class="{ collapsed: collapsedCatsAgent.has(String(catName)) }">▾</span>
           </div>
-          <div class="skills-list-compact">
+          <div v-show="!collapsedCatsAgent.has(String(catName))" class="skills-list-compact">
             <div
               v-for="skill in group"
               :key="skill.name"
@@ -176,7 +177,24 @@
       <div v-if="agentsConfigured.length === 0" class="compare-empty">
         <el-empty description="暂无可对比的 Agent" :image-size="60" />
       </div>
-      <el-scrollbar v-else class="compare-scrollbar">
+      <template v-else>
+        <!-- 顶部图例（固定，始终可见） -->
+        <div class="compare-legend compare-legend--top">
+          <span class="compare-legend-title">图例：</span>
+          <span class="compare-legend-item">
+            <span class="compare-dot compare-dot--enabled" />
+            <span class="compare-legend-text">已激活（agent 可用）</span>
+          </span>
+          <span class="compare-legend-item">
+            <span class="compare-dot compare-dot--inactive" />
+            <span class="compare-legend-text">已安装未激活</span>
+          </span>
+          <span class="compare-legend-item">
+            <span class="compare-dot compare-dot--absent" />
+            <span class="compare-legend-text">未配置</span>
+          </span>
+        </div>
+      <el-scrollbar class="compare-scrollbar">
         <!-- 列标题行 -->
         <div class="compare-header">
           <div class="compare-skill-col">技能</div>
@@ -214,13 +232,8 @@
             </div>
           </div>
         </template>
-        <!-- 图例 -->
-        <div class="compare-legend">
-          <span class="compare-legend-item"><span class="compare-dot compare-dot--enabled" /> 已激活</span>
-          <span class="compare-legend-item"><span class="compare-dot compare-dot--inactive" /> 已安装未激活</span>
-          <span class="compare-legend-item"><span class="compare-dot compare-dot--absent" /> 未配置</span>
-        </div>
       </el-scrollbar>
+      </template>
     </div>
 
     <!-- ══ ClawHub 搜索模式 ══ -->
@@ -302,12 +315,13 @@
       class="skills-scrollbar"
     >
       <template v-for="(catSkills, catName) in filteredSkillsByCategory" :key="catName">
-        <div class="category-header">
+        <div class="category-header" @click="toggleCatMain(String(catName))">
           <span class="category-icon">{{ getCategoryIcon(catName) }}</span>
           <span class="category-name">{{ catName }}</span>
           <span class="category-count">{{ catSkills.length }}</span>
+          <span class="category-chevron" :class="{ collapsed: collapsedCatsMain.has(String(catName)) }">▾</span>
         </div>
-        <div class="skills-grid">
+        <div v-show="!collapsedCatsMain.has(String(catName))" class="skills-grid">
           <el-card
             v-for="skill in catSkills"
             :key="skill.name"
@@ -431,6 +445,20 @@ const hasSearched = ref(false)
 const expandedSkillName = ref('')
 const expandedSkillTools = ref<string[]>([])
 const expandedSkillLoading = ref(false)
+
+// 分类折叠状态（用 Set 存储已折叠的分类名）
+const collapsedCatsMain = ref<Set<string>>(new Set())
+const collapsedCatsAgent = ref<Set<string>>(new Set())
+function toggleCatMain(cat: string) {
+  const s = new Set(collapsedCatsMain.value)
+  s.has(cat) ? s.delete(cat) : s.add(cat)
+  collapsedCatsMain.value = s
+}
+function toggleCatAgent(cat: string) {
+  const s = new Set(collapsedCatsAgent.value)
+  s.has(cat) ? s.delete(cat) : s.add(cat)
+  collapsedCatsAgent.value = s
+}
 
 async function toggleSkillExpand(skillName: string): Promise<void> {
   if (expandedSkillName.value === skillName) {
@@ -952,10 +980,15 @@ function formatDate(dateStr: string): string {
   gap: 8px;
   padding: 10px 4px 6px;
   margin-top: 8px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+  transition: background 0.15s;
 }
+.category-header:hover { background: rgba(255,255,255,0.04); }
 .category-header:first-child { margin-top: 0; }
 .category-icon { font-size: 15px; }
-.category-name { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.category-name { font-size: 13px; font-weight: 700; color: var(--text-primary); flex: 1; }
 .category-count {
   font-size: 11px;
   color: var(--text-secondary);
@@ -965,6 +998,14 @@ function formatDate(dateStr: string): string {
   height: 18px;
   line-height: 18px;
 }
+.category-chevron {
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: transform 0.2s;
+  display: inline-block;
+  margin-left: 2px;
+}
+.category-chevron.collapsed { transform: rotate(-90deg); }
 
 /* ── 卡片网格 ── */
 .skills-grid {
@@ -1297,5 +1338,33 @@ function formatDate(dateStr: string): string {
 .compare-legend-item {
   display: flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--text-secondary);
+}
+
+/* ── 顶部固定图例（对比 tab 用） ── */
+.compare-legend--top {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  background: linear-gradient(135deg, rgba(66,165,245,0.06), rgba(76,175,80,0.04));
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  border-top: 1px solid rgba(255,255,255,0.08);  /* 覆盖通用 .compare-legend 的 border-top */
+}
+.compare-legend--top .compare-legend-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+.compare-legend--top .compare-legend-item {
+  font-size: 12px;
+  color: var(--text-primary);
+  gap: 7px;
+}
+.compare-legend--top .compare-legend-text {
+  white-space: nowrap;
 }
 </style>

@@ -30,6 +30,7 @@
         class="agent-card"
         shadow="hover"
         @click="openDrawer"
+        @dblclick="openDrawerAndChat"
       >
         <!-- Header: Name + Status Badge -->
         <div class="card-header">
@@ -118,7 +119,16 @@
           >
             <template #default>
               <div class="live-steps-popup">
-                <div class="live-steps-title">近期活动</div>
+                <div class="live-steps-title">
+                  <span>近期活动</span>
+                  <el-button
+                    link size="small"
+                    class="live-thinking-toggle"
+                    @click="showAllThinking = !showAllThinking"
+                  >
+                    {{ showAllThinking ? '隐藏思考原文' : '查看完整思考（英文）' }}
+                  </el-button>
+                </div>
                 <template v-if="liveSteps.length > 0">
                   <div
                     v-for="(step, i) in liveSteps"
@@ -129,7 +139,7 @@
                     <span class="step-icon-sm">{{ stepIcon(step.type) }}</span>
                     <div class="step-content">
                       <span class="step-type-badge">{{ stepTypeLabel(step.type) }}</span>
-                      <span class="step-full-text">{{ stepPopupText(step) }}</span>
+                      <span class="step-full-text">{{ showAllThinking && step.type === 'thinking' ? step.text : stepPopupText(step) }}</span>
                     </div>
                   </div>
                 </template>
@@ -157,6 +167,7 @@
     class="agent-card"
     shadow="hover"
     @click="openDrawer"
+    @dblclick="openDrawerAndChat"
   >
     <!-- Header: Name + Status Badge -->
     <div class="card-header">
@@ -246,7 +257,16 @@
       >
         <template #default>
           <div class="live-steps-popup">
-            <div class="live-steps-title">近期活动</div>
+            <div class="live-steps-title">
+              <span>近期活动</span>
+              <el-button
+                link size="small"
+                class="live-thinking-toggle"
+                @click="showAllThinking = !showAllThinking"
+              >
+                {{ showAllThinking ? '隐藏思考原文' : '查看完整思考（英文）' }}
+              </el-button>
+            </div>
             <template v-if="liveSteps.length > 0">
               <div
                 v-for="(step, i) in liveSteps"
@@ -255,7 +275,10 @@
                 :class="`step-type-${step.type}`"
               >
                 <span class="step-icon-sm">{{ stepIcon(step.type) }}</span>
-                <span class="step-full-text">{{ stepShortText(step) }}</span>
+                <div class="step-content">
+                  <span class="step-type-badge">{{ stepTypeLabel(step.type) }}</span>
+                  <span class="step-full-text">{{ showAllThinking && step.type === 'thinking' ? step.text : stepPopupText(step) }}</span>
+                </div>
               </div>
             </template>
             <div v-else class="live-steps-empty">加载中…</div>
@@ -264,10 +287,10 @@
         <template #reference>
           <div class="live-activity-strip" @click.stop>
             <span class="live-pulse-dot" />
-            <span class="live-activity-text">
-              <span v-if="latestStep">{{ stepIcon(latestStep.type) }} {{ stepShortText(latestStep).slice(0, 64) }}</span>
-              <span v-else>正在运行…</span>
-            </span>
+            <div class="live-activity-content">
+              <span class="live-step-type">{{ bestInlineStep ? stepTypeLabel(bestInlineStep.type) : '运行中' }}</span>
+              <span class="live-activity-text">{{ stepInlineText(bestInlineStep) }}</span>
+            </div>
           </div>
         </template>
       </el-popover>
@@ -303,7 +326,7 @@ interface BubbleMessage {
 }
 
 const emit = defineEmits<{
-  (e: 'detail', agent: AgentInfo): void
+  (e: 'detail', agent: AgentInfo, opts?: { focusInput?: boolean }): void
 }>()
 
 const store = useAgentStore()
@@ -509,6 +532,7 @@ interface LiveStep {
 }
 
 const liveSteps = ref<LiveStep[]>([])
+const showAllThinking = ref(false)  // 是否展示完整 thinking 原文
 let liveActivityTimer: ReturnType<typeof setInterval> | null = null
 
 async function fetchLiveActivity() {
@@ -598,6 +622,10 @@ function stepPopupText(step: LiveStep): string {
 
 function openDrawer(): void {
   emit('detail', props.agent)
+}
+
+function openDrawerAndChat(): void {
+  emit('detail', props.agent, { focusInput: true })
 }
 </script>
 
@@ -921,6 +949,9 @@ function openDrawer(): void {
   padding: 2px 0;
 }
 .live-steps-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 11px;
   font-weight: 600;
   color: rgba(255,255,255,0.4);
@@ -928,6 +959,13 @@ function openDrawer(): void {
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.live-thinking-toggle {
+  font-size: 10px !important;
+  color: #60a5fa !important;
+  padding: 0 !important;
+  height: auto !important;
+  letter-spacing: 0;
 }
 .live-step-row {
   display: flex;

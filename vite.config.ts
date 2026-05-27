@@ -66,6 +66,41 @@ export default defineConfig(({ mode }) => {
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },
+        '/api/agent-send-message': {
+          // 通过 openclaw CLI 发消息给 agent（端口 31002）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
+        '/api/billing-config': {
+          // 计费配置读写（端口 31002）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
+        '/api/file-manager': {
+          // 文件管理器（端口 31002）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
+        '/api/cost-summary': {
+          // 费用预估（端口 31002）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
+        '/api/cost-timeline': {
+          // 费用时间线（端口 31002）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
+        '/api/projects': {
+          // 项目看板 API（端口 31002）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
+        '/api/cron': {
+          // Cron 任务中心 API（端口 31002）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
         '/api/upload-image': {
           // 图片上传 API (端口 31002, REC-093)
           target: `http://localhost:${backendPort}`,
