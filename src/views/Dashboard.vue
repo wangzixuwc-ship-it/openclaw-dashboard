@@ -83,14 +83,6 @@
             </button>
           </el-tooltip>
 
-          <!-- Sprint 7: 活动时间线 -->
-          <el-tooltip content="活动时间线 Gantt 图" placement="bottom">
-            <button class="top-indicator top-indicator-timeline" @click="activityTimelineVisible = true">
-              <el-icon :size="13"><DataLine /></el-icon>
-              <span class="top-ind-label">时间线</span>
-            </button>
-          </el-tooltip>
-
           <!-- Sprint 9: #18 主题切换（Dark/Light Theme Toggle）-->
           <el-tooltip :content="isDark ? '切换亮色主题' : '切换暗色主题'" placement="bottom">
             <button class="top-indicator top-indicator-theme" @click="toggleTheme">
@@ -270,7 +262,28 @@
       </el-card>
     </div>
 
-    <el-divider v-if="!workflowData.projectName" style="margin:0;"></el-divider> 
+    <el-divider v-if="!workflowData.projectName" style="margin:0;"></el-divider>
+
+    <!-- ========= 3.5 内联活动时间线（Inline Activity Timeline，可折叠）=========
+         layoutConfig.sections.timeline 控制是否显示（可在自定义布局关闭）
+    -->
+    <section
+      v-if="layoutConfig.sections?.timeline !== false"
+      class="inline-timeline-section"
+      :class="{ collapsed: layoutConfig.timelineCollapsed }"
+    >
+      <!-- 折叠栏头 -->
+      <div class="itl-bar" @click="toggleTimelineCollapsed()">
+        <span class="itl-bar-icon">📈</span>
+        <span class="itl-bar-label">活动时间线</span>
+        <span class="itl-bar-hint">Gantt 图</span>
+        <span class="itl-bar-arrow">{{ layoutConfig.timelineCollapsed ? '▶' : '▼' }}</span>
+      </div>
+      <!-- 折叠内容（收起时 v-show 控制隐藏但保留 DOM）-->
+      <div v-show="!layoutConfig.timelineCollapsed" class="itl-content">
+        <ActivityTimelineDialog :inline="true" />
+      </div>
+    </section>
 
     <!-- ========= 4. 看板主体（5列：空闲/运行中/已终止/错误/未知） ========= -->
     <main class="board-container">
@@ -433,7 +446,9 @@
       @open-action="handlePaletteAction"
       @navigate-agent="handlePaletteNavigateAgent"
     />
+    <!-- ActivityTimelineDialog 已改为内联时间线区域，保留弹窗备用（从命令面板打开）-->
     <ActivityTimelineDialog v-model="activityTimelineVisible" />
+
 
     <!-- Sprint 9: #6 快捷消息发送 FAB（Floating Action Button 浮动操作按钮）-->
     <QuickMsgFab />
@@ -497,7 +512,6 @@ import {
   Grid,
   Timer,
   Search,
-  DataLine
 } from '@element-plus/icons-vue'
 // el import removed (unused)
 
@@ -586,7 +600,7 @@ const billingDialogVisible = ref(false)
 const fileManagerVisible = ref(false)
 
 // 自定义布局
-const { config: layoutConfig } = useLayoutSettings()
+const { config: layoutConfig, toggleTimelineCollapsed } = useLayoutSettings()
 const layoutDialogVisible = ref(false)
 
 // 项目看板
@@ -596,12 +610,13 @@ const projectSummary = ref('查看项目进度')
 // Cron 任务中心
 const cronCenterVisible = ref(false)
 
-// Sprint 7: 命令面板 + 活动时间线
+// Sprint 7: 命令面板 + 活动时间线弹窗备用（命令面板打开）
 const commandPaletteVisible = ref(false)
 const activityTimelineVisible = ref(false)
 
 // Sprint 9: #18 主题切换（Dark/Light Theme Toggle）
 const { isDark, toggleTheme } = useTheme()
+
 
 function statusBarOrder(id: string): number {
   const idx = layoutConfig.value.statusBar.indexOf(id)
@@ -1024,6 +1039,58 @@ onUnmounted(() => {
 }
 
 /* ==================== 功能区（action-bar）==================== */
+/* ─── 内联活动时间线区域（Inline Activity Timeline Section）─────────────────── */
+.inline-timeline-section {
+  background: var(--bg-secondary, #1e293b);
+  border-top: 1px solid var(--border-color, #334155);
+  border-bottom: 1px solid var(--border-color, #334155);
+  margin-bottom: 4px;
+}
+
+/* 折叠栏头 */
+.itl-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 24px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.itl-bar:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.itl-bar-icon { font-size: 14px; }
+
+.itl-bar-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #f1f5f9);
+}
+
+.itl-bar-hint {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+}
+
+.itl-bar-arrow {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted, #64748b);
+  transition: transform 0.2s;
+}
+
+.inline-timeline-section.collapsed .itl-bar-arrow {
+  /* 已通过内容"▶"/"▼"表示状态 */
+}
+
+/* 折叠内容区 */
+.itl-content {
+  overflow: hidden;
+}
+
 .action-bar-section {
   max-width: 1440px;
   margin: 0 auto;

@@ -1,5 +1,7 @@
 <template>
+  <!-- ── 弹窗模式（Dialog Mode）── -->
   <el-dialog
+    v-if="!inline"
     v-model="visible"
     title=""
     width="92vw"
@@ -13,13 +15,9 @@
         <div class="tl-title-row">
           <span class="tl-title">📈 活动时间线</span>
           <div class="tl-range-btns">
-            <button
-              v-for="opt in RANGE_OPTIONS"
-              :key="opt.hours"
-              class="tl-range-btn"
-              :class="{ active: selectedHours === opt.hours }"
-              @click="setRange(opt.hours)"
-            >{{ opt.label }}</button>
+            <button v-for="opt in RANGE_OPTIONS" :key="opt.hours"
+              class="tl-range-btn" :class="{ active: selectedHours === opt.hours }"
+              @click="setRange(opt.hours)">{{ opt.label }}</button>
           </div>
         </div>
         <div class="tl-summary" v-if="!loading && sessions.length">
@@ -28,120 +26,58 @@
         </div>
       </div>
     </template>
-
     <div class="tl-body" v-loading="loading">
-      <!-- Empty state -->
       <div v-if="!loading && sessions.length === 0" class="tl-empty">
         <div class="tl-empty-icon">📭</div>
         <div>过去 {{ selectedHours }} 小时内没有 agent 活动记录</div>
         <div class="tl-empty-sub">尝试扩大时间窗口</div>
       </div>
-
-      <!-- Gantt Chart -->
-      <div v-else class="tl-chart-wrap" ref="chartWrap">
-        <!-- Swimlane labels (left) -->
+      <div v-else class="tl-chart-wrap">
         <div class="tl-lane-labels">
           <div class="tl-lane-label tl-time-label-spacer"></div>
-          <div
-            v-for="lane in agentLanes"
-            :key="lane.agentId"
-            class="tl-lane-label"
-            :style="{ height: LANE_H + 'px' }"
-          >
+          <div v-for="lane in agentLanes" :key="lane.agentId"
+            class="tl-lane-label" :style="{ height: LANE_H + 'px' }">
             <span class="tl-lane-emoji">{{ lane.emoji }}</span>
             <span class="tl-lane-name">{{ lane.name }}</span>
           </div>
         </div>
-
-        <!-- SVG chart -->
         <div class="tl-svg-wrap" ref="svgWrap" @scroll="onScroll">
-          <svg
-            :width="svgWidth"
-            :height="svgHeight"
-            class="tl-svg"
-          >
-            <!-- Background grid -->
+          <svg :width="svgWidth" :height="svgHeight" class="tl-svg">
             <rect width="100%" height="100%" fill="transparent" />
-
-            <!-- Time grid lines -->
             <g class="tl-grid">
               <template v-for="tick in timeTicks" :key="tick.ts">
-                <line
-                  :x1="tick.x" :y1="TIME_AXIS_H"
-                  :x2="tick.x" :y2="svgHeight - 0"
-                  stroke="rgba(255,255,255,0.05)"
-                  stroke-width="1"
-                />
-                <text
-                  :x="tick.x + 4"
-                  :y="TIME_AXIS_H - 6"
-                  fill="rgba(255,255,255,0.3)"
-                  font-size="10"
-                >{{ tick.label }}</text>
+                <line :x1="tick.x" :y1="TIME_AXIS_H" :x2="tick.x" :y2="svgHeight"
+                  stroke="rgba(255,255,255,0.05)" stroke-width="1" />
+                <text :x="tick.x + 4" :y="TIME_AXIS_H - 6"
+                  fill="rgba(255,255,255,0.3)" font-size="10">{{ tick.label }}</text>
               </template>
             </g>
-
-            <!-- NOW line -->
             <g v-if="nowX > 0 && nowX < svgWidth">
-              <line
-                :x1="nowX" :y1="TIME_AXIS_H"
-                :x2="nowX" :y2="svgHeight"
-                stroke="#f59e0b"
-                stroke-width="1"
-                stroke-dasharray="4,3"
-              />
+              <line :x1="nowX" :y1="TIME_AXIS_H" :x2="nowX" :y2="svgHeight"
+                stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3" />
               <text :x="nowX + 4" :y="TIME_AXIS_H - 6" fill="#f59e0b" font-size="10">NOW</text>
             </g>
-
-            <!-- Swimlane backgrounds -->
             <g>
               <template v-for="(lane, li) in agentLanes" :key="lane.agentId + '-bg'">
-                <rect
-                  x="0"
-                  :y="TIME_AXIS_H + li * LANE_H"
-                  :width="svgWidth"
-                  :height="LANE_H"
-                  :fill="li % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent'"
-                />
+                <rect x="0" :y="TIME_AXIS_H + li * LANE_H" :width="svgWidth" :height="LANE_H"
+                  :fill="li % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent'" />
               </template>
             </g>
-
-            <!-- Session bars -->
             <g>
               <template v-for="bar in sessionBars" :key="bar.sessionId">
-                <rect
-                  :x="bar.x"
-                  :y="bar.y + 6"
-                  :width="Math.max(bar.w, 4)"
-                  :height="LANE_H - 12"
-                  :rx="4"
-                  :fill="bar.color"
-                  :opacity="hoveredSession === bar.sessionId ? 1 : 0.75"
+                <rect :x="bar.x" :y="bar.y + 6" :width="Math.max(bar.w, 4)" :height="LANE_H - 12" :rx="4"
+                  :fill="bar.color" :opacity="hoveredSession === bar.sessionId ? 1 : 0.75"
                   class="tl-bar"
-                  @mouseenter="e => showTooltip(e, bar)"
-                  @mouseleave="hideTooltip"
-                />
-                <!-- Trigger icon for cron sessions -->
-                <text
-                  v-if="bar.trigger === 'cron' && bar.w > 20"
-                  :x="bar.x + 5"
-                  :y="bar.y + LANE_H - 18"
-                  font-size="9"
-                  fill="rgba(255,255,255,0.7)"
-                >⏰</text>
+                  @mouseenter="e => showTooltip(e, bar)" @mouseleave="hideTooltip" />
+                <text v-if="bar.trigger === 'cron' && bar.w > 20"
+                  :x="bar.x + 5" :y="bar.y + LANE_H - 18" font-size="9" fill="rgba(255,255,255,0.7)">⏰</text>
               </template>
             </g>
-
-            <!-- Time axis labels (bottom of tick header) -->
-            <line x1="0" :y1="TIME_AXIS_H" :x2="svgWidth" :y2="TIME_AXIS_H" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+            <line x1="0" :y1="TIME_AXIS_H" :x2="svgWidth" :y2="TIME_AXIS_H"
+              stroke="rgba(255,255,255,0.08)" stroke-width="1" />
           </svg>
-
-          <!-- Tooltip -->
-          <div
-            v-if="tooltip.visible"
-            class="tl-tooltip"
-            :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
-          >
+          <div v-if="tooltip.visible" class="tl-tooltip"
+            :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
             <div class="tl-tt-agent">{{ tooltip.agentEmoji }} {{ tooltip.agentName }}</div>
             <div class="tl-tt-time">{{ tooltip.startTime }} → {{ tooltip.endTime }}</div>
             <div class="tl-tt-dur">时长 {{ tooltip.duration }}</div>
@@ -151,17 +87,107 @@
       </div>
     </div>
   </el-dialog>
+
+  <!-- ── 内联模式（Inline Mode）── -->
+  <template v-else>
+    <!-- 内联 header（范围选择 + 摘要 + 刷新）-->
+    <div class="tl-inline-header">
+      <div class="tl-inline-left">
+        <span class="tl-inline-title">📈 活动时间线</span>
+        <span class="tl-summary" v-if="!loading && sessions.length">
+          {{ sessions.length }} 条 · {{ agentLanes.length }} 个 agent ·
+          {{ formatDuration((timeEnd - timeStart) / 1000) }}
+        </span>
+        <span v-else-if="loading" class="tl-summary">加载中…</span>
+        <span v-else class="tl-summary">暂无活动</span>
+      </div>
+      <div class="tl-inline-right">
+        <div class="tl-range-btns">
+          <button v-for="opt in RANGE_OPTIONS" :key="opt.hours"
+            class="tl-range-btn" :class="{ active: selectedHours === opt.hours }"
+            @click="setRange(opt.hours)">{{ opt.label }}</button>
+        </div>
+        <button class="tl-refresh-btn" @click="fetchTimeline" title="刷新数据">↺</button>
+      </div>
+    </div>
+
+    <!-- 内联图表正文 -->
+    <div class="tl-body tl-body-inline" v-loading="loading">
+      <div v-if="!loading && sessions.length === 0" class="tl-empty">
+        <div class="tl-empty-icon">📭</div>
+        <div>过去 {{ selectedHours }} 小时内没有 Agent 活动</div>
+        <div class="tl-empty-sub">尝试扩大时间范围</div>
+      </div>
+      <div v-else class="tl-chart-wrap">
+        <div class="tl-lane-labels">
+          <div class="tl-lane-label tl-time-label-spacer"></div>
+          <div v-for="lane in agentLanes" :key="lane.agentId"
+            class="tl-lane-label" :style="{ height: LANE_H + 'px' }">
+            <span class="tl-lane-emoji">{{ lane.emoji }}</span>
+            <span class="tl-lane-name">{{ lane.name }}</span>
+          </div>
+        </div>
+        <div class="tl-svg-wrap" ref="svgWrap" @scroll="onScroll">
+          <svg :width="svgWidth" :height="svgHeight" class="tl-svg">
+            <rect width="100%" height="100%" fill="transparent" />
+            <g class="tl-grid">
+              <template v-for="tick in timeTicks" :key="tick.ts">
+                <line :x1="tick.x" :y1="TIME_AXIS_H" :x2="tick.x" :y2="svgHeight"
+                  stroke="rgba(255,255,255,0.05)" stroke-width="1" />
+                <text :x="tick.x + 4" :y="TIME_AXIS_H - 6"
+                  fill="rgba(255,255,255,0.3)" font-size="10">{{ tick.label }}</text>
+              </template>
+            </g>
+            <g v-if="nowX > 0 && nowX < svgWidth">
+              <line :x1="nowX" :y1="TIME_AXIS_H" :x2="nowX" :y2="svgHeight"
+                stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3" />
+              <text :x="nowX + 4" :y="TIME_AXIS_H - 6" fill="#f59e0b" font-size="10">NOW</text>
+            </g>
+            <g>
+              <template v-for="(lane, li) in agentLanes" :key="lane.agentId + '-bg'">
+                <rect x="0" :y="TIME_AXIS_H + li * LANE_H" :width="svgWidth" :height="LANE_H"
+                  :fill="li % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent'" />
+              </template>
+            </g>
+            <g>
+              <template v-for="bar in sessionBars" :key="bar.sessionId">
+                <rect :x="bar.x" :y="bar.y + 6" :width="Math.max(bar.w, 4)" :height="LANE_H - 12" :rx="4"
+                  :fill="bar.color" :opacity="hoveredSession === bar.sessionId ? 1 : 0.75"
+                  class="tl-bar"
+                  @mouseenter="e => showTooltip(e, bar)" @mouseleave="hideTooltip" />
+                <text v-if="bar.trigger === 'cron' && bar.w > 20"
+                  :x="bar.x + 5" :y="bar.y + LANE_H - 18" font-size="9" fill="rgba(255,255,255,0.7)">⏰</text>
+              </template>
+            </g>
+            <line x1="0" :y1="TIME_AXIS_H" :x2="svgWidth" :y2="TIME_AXIS_H"
+              stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+          </svg>
+          <div v-if="tooltip.visible" class="tl-tooltip"
+            :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
+            <div class="tl-tt-agent">{{ tooltip.agentEmoji }} {{ tooltip.agentName }}</div>
+            <div class="tl-tt-time">{{ tooltip.startTime }} → {{ tooltip.endTime }}</div>
+            <div class="tl-tt-dur">时长 {{ tooltip.duration }}</div>
+            <div class="tl-tt-trigger">触发：{{ tooltip.trigger === 'cron' ? '⏰ 定时任务' : '👤 用户消息' }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 
-const props = defineProps<{ modelValue: boolean }>()
+const props = defineProps<{
+  modelValue?: boolean
+  /** 内联模式（Inline Mode）：不使用 el-dialog，直接嵌入页面 */
+  inline?: boolean
+}>()
 const emit = defineEmits<{ 'update:modelValue': [val: boolean] }>()
 
 const visible = computed({
-  get: () => props.modelValue,
+  get: () => props.modelValue ?? false,
   set: (v) => emit('update:modelValue', v),
 })
 
@@ -260,7 +286,6 @@ const timeSpan = computed(() => Math.max(timeEnd.value - timeStart.value, 1))
 const agentLanes = computed(() => {
   const agentIds = [...new Set(sessions.value.map(s => s.agentId))]
   agentIds.sort((a, b) => {
-    // Sort by first appearance
     const aFirst = sessions.value.find(s => s.agentId === a)?.startMs || 0
     const bFirst = sessions.value.find(s => s.agentId === b)?.startMs || 0
     return aFirst - bFirst
@@ -287,24 +312,19 @@ const sessionBars = computed(() => {
     const x2 = tsToX(s.endMs)
     const w = Math.max(x2 - x, MIN_BAR_W)
     const y = TIME_AXIS_H + laneIdx * LANE_H
-    return {
-      ...s,
-      x, y, w,
-      color: agentColor(s.agentId),
-    }
+    return { ...s, x, y, w, color: agentColor(s.agentId) }
   })
 })
 
 const timeTicks = computed(() => {
   const ticks: { ts: number; x: number; label: string }[] = []
   const spanMs = timeSpan.value
-  // Choose tick interval based on span
   let intervalMs: number
-  if (spanMs <= 3 * 3600000)        intervalMs = 15 * 60000    // 15 min
-  else if (spanMs <= 12 * 3600000)  intervalMs = 60 * 60000    // 1 hour
-  else if (spanMs <= 4 * 86400000)  intervalMs = 6 * 3600000   // 6 hours
-  else if (spanMs <= 14 * 86400000) intervalMs = 24 * 3600000  // 1 day
-  else                               intervalMs = 7 * 86400000  // 1 week
+  if (spanMs <= 3 * 3600000)        intervalMs = 15 * 60000
+  else if (spanMs <= 12 * 3600000)  intervalMs = 60 * 60000
+  else if (spanMs <= 4 * 86400000)  intervalMs = 6 * 3600000
+  else if (spanMs <= 14 * 86400000) intervalMs = 24 * 3600000
+  else                               intervalMs = 7 * 86400000
 
   const first = Math.ceil(timeStart.value / intervalMs) * intervalMs
   for (let ts = first; ts <= timeEnd.value; ts += intervalMs) {
@@ -327,10 +347,8 @@ function showTooltip(e: MouseEvent, bar: any) {
   hoveredSession.value = bar.sessionId
   const svgRect = (e.target as SVGElement).closest('svg')?.getBoundingClientRect()
   if (!svgRect) return
-
   const x = e.clientX - (svgRect.left + (svgWrap.value?.scrollLeft || 0)) + 12
   const y = e.clientY - svgRect.top - 60
-
   tooltip.value = {
     visible: true,
     x: Math.min(x, svgWidth.value - 200),
@@ -370,194 +388,96 @@ function formatDuration(secs: number) {
 
 // === Lifecycle ===
 watch(() => props.modelValue, async (val) => {
-  if (val) {
+  // 弹窗模式：打开时加载数据
+  if (!props.inline && val) {
     await loadAgentMeta()
     await fetchTimeline()
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('resize', updateSvgWidth)
+  // 内联模式（Inline Mode）：挂载时立即加载数据
+  if (props.inline) {
+    await loadAgentMeta()
+    await fetchTimeline()
+  }
 })
+
+// 暴露 fetchTimeline 供父组件展开时触发
+defineExpose({ fetchTimeline })
 </script>
 
 <style scoped>
-.timeline-dialog :deep(.el-dialog__header) {
-  padding: 16px 20px 0;
-}
+.timeline-dialog :deep(.el-dialog__header) { padding: 16px 20px 0; }
+.timeline-dialog :deep(.el-dialog__body) { padding: 0; }
 
-.timeline-dialog :deep(.el-dialog__body) {
-  padding: 0;
-}
+/* ─── 弹窗 header ───────────────────────────────────────────────────────────── */
+.tl-header { display: flex; flex-direction: column; gap: 4px; }
+.tl-title-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.tl-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.tl-summary { font-size: 12px; color: rgba(255, 255, 255, 0.35); }
 
-.tl-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.tl-title-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.tl-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.tl-range-btns {
-  display: flex;
-  gap: 4px;
-}
-
+.tl-range-btns { display: flex; gap: 4px; }
 .tl-range-btn {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 12px;
-  padding: 3px 10px;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: inherit;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px; color: rgba(255,255,255,0.5); font-size: 12px;
+  padding: 3px 10px; cursor: pointer; transition: all 0.15s; font-family: inherit;
 }
-
-.tl-range-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-}
-
+.tl-range-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
 .tl-range-btn.active {
-  background: rgba(99, 102, 241, 0.25);
-  border-color: rgba(99, 102, 241, 0.5);
-  color: #a5b4fc;
+  background: rgba(99,102,241,0.25); border-color: rgba(99,102,241,0.5); color: #a5b4fc;
 }
 
-.tl-summary {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.35);
-}
-
-.tl-body {
-  padding: 16px;
-  min-height: 200px;
-}
+/* ─── 图表正文 ───────────────────────────────────────────────────────────────── */
+.tl-body { padding: 16px; min-height: 100px; }
+.tl-body-inline { padding: 0 16px 12px; }
 
 .tl-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 60px 0;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 14px;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 8px; padding: 40px 0; color: rgba(255,255,255,0.3); font-size: 14px;
 }
+.tl-empty-icon { font-size: 36px; }
+.tl-empty-sub { font-size: 12px; color: rgba(255,255,255,0.2); }
 
-.tl-empty-icon {
-  font-size: 40px;
-}
-
-.tl-empty-sub {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.2);
-}
-
-.tl-chart-wrap {
-  display: flex;
-  gap: 0;
-  overflow: hidden;
-}
-
-.tl-lane-labels {
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  width: 80px;
-}
-
-.tl-time-label-spacer {
-  height: v-bind('TIME_AXIS_H + "px"');
-  flex-shrink: 0;
-}
-
-.tl-lane-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding-right: 8px;
-  flex-shrink: 0;
-  overflow: hidden;
-}
-
-.tl-lane-emoji {
-  font-size: 15px;
-  flex-shrink: 0;
-}
-
-.tl-lane-name {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.tl-chart-wrap { display: flex; gap: 0; overflow: hidden; }
+.tl-lane-labels { display: flex; flex-direction: column; flex-shrink: 0; width: 80px; }
+.tl-time-label-spacer { height: v-bind('TIME_AXIS_H + "px"'); flex-shrink: 0; }
+.tl-lane-label { display: flex; align-items: center; gap: 4px; padding-right: 8px; flex-shrink: 0; overflow: hidden; }
+.tl-lane-emoji { font-size: 15px; flex-shrink: 0; }
+.tl-lane-name { font-size: 11px; color: rgba(255,255,255,0.5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .tl-svg-wrap {
-  flex: 1;
-  overflow-x: auto;
-  overflow-y: hidden;
-  position: relative;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.15);
+  flex: 1; overflow-x: auto; overflow-y: hidden; position: relative;
+  border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; background: rgba(0,0,0,0.15);
 }
-
-.tl-svg {
-  display: block;
-}
-
-.tl-bar {
-  cursor: pointer;
-  transition: opacity 0.1s;
-}
+.tl-svg { display: block; }
+.tl-bar { cursor: pointer; transition: opacity 0.1s; }
 
 .tl-tooltip {
-  position: absolute;
-  background: #1e1e2e;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  padding: 10px 12px;
-  min-width: 180px;
-  pointer-events: none;
-  z-index: 10;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  position: absolute; background: #1e1e2e;
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+  padding: 10px 12px; min-width: 180px; pointer-events: none; z-index: 10;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
+.tl-tt-agent { font-size: 13px; font-weight: 600; color: #f1f5f9; margin-bottom: 6px; }
+.tl-tt-time  { font-size: 12px; color: #94a3b8; }
+.tl-tt-dur   { font-size: 12px; color: #94a3b8; }
+.tl-tt-trigger { font-size: 11px; color: #64748b; margin-top: 4px; }
 
-.tl-tt-agent {
-  font-size: 13px;
-  font-weight: 600;
-  color: #fff;
-  margin-bottom: 6px;
+/* ─── 内联模式（Inline Mode）header ────────────────────────────────────────── */
+.tl-inline-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 20px 6px; gap: 12px;
 }
-
-.tl-tt-time {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-  font-variant-numeric: tabular-nums;
+.tl-inline-left { display: flex; align-items: center; gap: 12px; }
+.tl-inline-title { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+.tl-inline-right { display: flex; align-items: center; gap: 8px; }
+.tl-refresh-btn {
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px; color: rgba(255,255,255,0.4); font-size: 14px;
+  width: 28px; height: 28px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: all 0.15s;
 }
-
-.tl-tt-dur {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.tl-tt-trigger {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 4px;
-}
+.tl-refresh-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
 </style>

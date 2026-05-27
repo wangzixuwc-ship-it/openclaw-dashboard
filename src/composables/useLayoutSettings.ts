@@ -1,8 +1,8 @@
 import { ref, watch } from 'vue'
 
 // ── 默认顺序（version/gateway/notif 固定在顶栏，不参与功能区排列）──
+// GPU 显存不在排序列表（条件显示，无需排序）
 const DEFAULT_STATUS_BAR: string[] = [
-  'gpu',         // GPU 显存（条件显示）
   'fileManager', // 文件管理
   'billing',     // 计费配置
   'skills',      // 技能库
@@ -22,24 +22,50 @@ const DEFAULT_STATS_CARDS: string[] = [
   'cost',     // 本次运行费用
 ]
 
-const STORAGE_KEY = 'openclaw_dashboard_layout_v1'
+// ── 第三模块：内嵌视图可见性（Inline Section Visibility）──
+const DEFAULT_SECTIONS: Record<string, boolean> = {
+  timeline: true, // 活动时间线 Gantt 图（默认展开）
+}
+
+const STORAGE_KEY = 'openclaw_dashboard_layout_v2'
 
 interface LayoutConfig {
   statusBar: string[]
   statsCards: string[]
+  sections: Record<string, boolean>
+  timelineCollapsed: boolean
 }
 
 function loadFromStorage(): LayoutConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { statusBar: [...DEFAULT_STATUS_BAR], statsCards: [...DEFAULT_STATS_CARDS] }
-    const parsed = JSON.parse(raw)
-    // 校验：清洗未知 ID + 补齐缺失 ID（防止新增功能时找不到）
-    const sb = mergeWithDefault(parsed.statusBar, DEFAULT_STATUS_BAR)
-    const sc = mergeWithDefault(parsed.statsCards, DEFAULT_STATS_CARDS)
-    return { statusBar: sb, statsCards: sc }
+    // 也检查旧 key（v1 升级迁移）
+    const rawV1 = localStorage.getItem('openclaw_dashboard_layout_v1')
+    const source = raw ? JSON.parse(raw) : (rawV1 ? JSON.parse(rawV1) : null)
+    if (!source) {
+      return {
+        statusBar: [...DEFAULT_STATUS_BAR],
+        statsCards: [...DEFAULT_STATS_CARDS],
+        sections: { ...DEFAULT_SECTIONS },
+        timelineCollapsed: false,
+      }
+    }
+    const sb = mergeWithDefault(source.statusBar, DEFAULT_STATUS_BAR)
+    const sc = mergeWithDefault(source.statsCards, DEFAULT_STATS_CARDS)
+    const sec = { ...DEFAULT_SECTIONS, ...(source.sections || {}) }
+    return {
+      statusBar: sb,
+      statsCards: sc,
+      sections: sec,
+      timelineCollapsed: source.timelineCollapsed ?? false,
+    }
   } catch {
-    return { statusBar: [...DEFAULT_STATUS_BAR], statsCards: [...DEFAULT_STATS_CARDS] }
+    return {
+      statusBar: [...DEFAULT_STATUS_BAR],
+      statsCards: [...DEFAULT_STATS_CARDS],
+      sections: { ...DEFAULT_SECTIONS },
+      timelineCollapsed: false,
+    }
   }
 }
 
@@ -47,7 +73,6 @@ function mergeWithDefault(saved: string[] | undefined, defaults: string[]): stri
   if (!Array.isArray(saved)) return [...defaults]
   const validSet = new Set(defaults)
   const result = saved.filter(id => validSet.has(id))
-  // 补齐 defaults 中有但 saved 没有的
   for (const id of defaults) {
     if (!result.includes(id)) result.push(id)
   }
@@ -74,8 +99,21 @@ function setStatsCardsOrder(order: string[]) {
   config.value.statsCards = mergeWithDefault(order, DEFAULT_STATS_CARDS)
 }
 
+function setSectionVisible(id: string, visible: boolean) {
+  config.value.sections = { ...config.value.sections, [id]: visible }
+}
+
+function toggleTimelineCollapsed() {
+  config.value.timelineCollapsed = !config.value.timelineCollapsed
+}
+
 function resetToDefault() {
-  config.value = { statusBar: [...DEFAULT_STATUS_BAR], statsCards: [...DEFAULT_STATS_CARDS] }
+  config.value = {
+    statusBar: [...DEFAULT_STATUS_BAR],
+    statsCards: [...DEFAULT_STATS_CARDS],
+    sections: { ...DEFAULT_SECTIONS },
+    timelineCollapsed: false,
+  }
 }
 
 function toggleEditMode() {
@@ -88,9 +126,12 @@ export function useLayoutSettings() {
     editMode,
     setStatusBarOrder,
     setStatsCardsOrder,
+    setSectionVisible,
+    toggleTimelineCollapsed,
     resetToDefault,
     toggleEditMode,
     DEFAULT_STATUS_BAR,
     DEFAULT_STATS_CARDS,
+    DEFAULT_SECTIONS,
   }
 }

@@ -85,6 +85,26 @@
       </div>
     </div>
 
+    <!-- 第三模块：内嵌视图可见性（Inline Section Visibility）-->
+    <div class="ls-section">
+      <div class="ls-section-title">
+        <span>内嵌视图显示</span>
+        <el-button link size="small" @click="resetSections">恢复默认</el-button>
+      </div>
+      <div class="ls-list">
+        <div v-for="item in sectionsMeta" :key="item.id" class="ls-item ls-item-toggle">
+          <span class="ls-item-icon">{{ item.icon }}</span>
+          <span class="ls-item-label">{{ item.label }}</span>
+          <span class="ls-item-desc">{{ item.desc }}</span>
+          <el-switch
+            v-model="localSections[item.id]"
+            size="small"
+            style="margin-left: auto"
+          />
+        </div>
+      </div>
+    </div>
+
     <template #footer>
       <div class="ls-footer">
         <el-button @click="resetAll" type="danger" plain>全部恢复默认</el-button>
@@ -103,22 +123,23 @@ import { InfoFilled, Top, Bottom } from '@element-plus/icons-vue'
 import { useLayoutSettings } from '../composables/useLayoutSettings'
 
 const visible = defineModel<boolean>('visible', { default: false })
-const { config, setStatusBarOrder, setStatsCardsOrder, DEFAULT_STATUS_BAR, DEFAULT_STATS_CARDS } = useLayoutSettings()
+const { config, setStatusBarOrder, setStatsCardsOrder, setSectionVisible, DEFAULT_STATUS_BAR, DEFAULT_STATS_CARDS, DEFAULT_SECTIONS } = useLayoutSettings()
 
 const localStatusBar = ref<string[]>([])
 const localStatsCards = ref<string[]>([])
+const localSections = ref<Record<string, boolean>>({})
 
 // 打开时同步当前配置
 watch(visible, (val) => {
   if (val) {
     localStatusBar.value = [...config.value.statusBar]
     localStatsCards.value = [...config.value.statsCards]
+    localSections.value = { ...config.value.sections }
   }
 })
 
-// ── 元数据：每个 id 对应的 icon + label + desc（仅功能区可排序项）──
+// ── 元数据：每个 id 对应的 icon + label + desc（功能区可排序项，已移除 GPU）──
 const statusBarMeta: Record<string, { icon: string; label: string; desc: string }> = {
-  gpu:         { icon: '🎮', label: 'GPU 显存', desc: '仅本地推理时显示' },
   fileManager: { icon: '📁', label: '文件管理', desc: '查看系统所有文件' },
   billing:     { icon: '💰', label: '计费配置', desc: '按模型自定义计费' },
   skills:      { icon: '🧰', label: '技能库', desc: '管理 agent 技能' },
@@ -137,6 +158,11 @@ const statsCardsMeta: Record<string, { icon: string; label: string; desc: string
   tokens:  { icon: '🔢', label: '历史消耗 Token', desc: '累计 token 用量' },
   cost:    { icon: '💸', label: '本次运行费用', desc: '本次累计费用 + 今日/月度预估' },
 }
+
+// ── 第三模块元数据 ──
+const sectionsMeta = [
+  { id: 'timeline', icon: '📈', label: '活动时间线', desc: 'Gantt 图内嵌展示（可折叠）' },
+]
 
 // ── 排序 ──
 function moveItem(group: 'statusBar' | 'statsCards', index: number, delta: number) {
@@ -172,14 +198,22 @@ function resetStatusBar() {
 function resetStatsCards() {
   localStatsCards.value = [...DEFAULT_STATS_CARDS]
 }
+function resetSections() {
+  localSections.value = { ...DEFAULT_SECTIONS }
+}
 function resetAll() {
   resetStatusBar()
   resetStatsCards()
+  resetSections()
 }
 
 function saveAndClose() {
   setStatusBarOrder(localStatusBar.value)
   setStatsCardsOrder(localStatsCards.value)
+  // 保存内嵌视图可见性
+  for (const [id, vis] of Object.entries(localSections.value)) {
+    setSectionVisible(id, vis)
+  }
   visible.value = false
 }
 </script>
@@ -266,5 +300,12 @@ function saveAndClose() {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+/* 切换型条目（内嵌视图模块）不需要拖拽手柄 */
+.ls-item-toggle {
+  cursor: default;
+}
+.ls-item-toggle:hover {
+  background: rgba(255,255,255,0.04);
 }
 </style>
