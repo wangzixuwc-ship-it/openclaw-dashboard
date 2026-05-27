@@ -3375,6 +3375,106 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // #16: 文件备份管理 API
+  // ============================================
+
+  // GET /api/file-manager/backups?path=... — 列出某文件的所有备份（.bak.{ts} 格式）
+  if (pathname === '/api/file-manager/backups' && req.method === 'GET') {
+    try {
+      const rawPath = url.searchParams.get('path') || ''
+      if (!rawPath) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'path 参数必填' }))
+        return
+      }
+      const real = rawPath.startsWith('~/') ? path.join(os.homedir(), rawPath.slice(2)) : rawPath
+      const allowed = [path.join(os.homedir(), 'clawd'), path.join(os.homedir(), '.openclaw')]
+      if (!allowed.some(a => real === a || real.startsWith(a + path.sep))) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'path outside allowed roots' }))
+        return
+      }
+      const dir = path.dirname(real)
+      const base = path.basename(real)
+      const backups = []
+      try {
+        const files = fsSync.readdirSync(dir)
+        for (const f of files) {
+          // 备份文件格式：{base}.bak.{timestamp}
+          if (f.startsWith(base + '.bak.')) {
+            const tsStr = f.slice(base.length + 5) // ".bak." = 5 chars
+            const ts = parseInt(tsStr, 10)
+            if (!isNaN(ts)) {
+              const fullPath = path.join(dir, f)
+              const stat = fsSync.statSync(fullPath)
+              backups.push({
+                path: fullPath,
+                displayPath: fullPath.replace(os.homedir(), '~'),
+                ts,
+                date: new Date(ts).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
+                size: stat.size,
+              })
+            }
+          }
+        }
+        // 最新的排在前面
+        backups.sort((a, b) => b.ts - a.ts)
+      } catch { /* 目录不存在 */ }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, backups, count: backups.length }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: e.message }))
+    }
+    return
+  }
+
+  // POST /api/file-manager/restore — 从备份恢复（将 backupPath 复制回 targetPath）
+  // body: { backupPath, targetPath }
+  if (pathname === '/api/file-manager/restore' && req.method === 'POST') {
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      try {
+        const { backupPath, targetPath } = JSON.parse(body)
+        if (!backupPath || !targetPath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'backupPath 和 targetPath 必填' }))
+          return
+        }
+        const resolveP = (p) => p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p
+        const realBak = resolveP(backupPath)
+        const realTgt = resolveP(targetPath)
+        const allowed = [path.join(os.homedir(), 'clawd'), path.join(os.homedir(), '.openclaw')]
+        if (!allowed.some(a => realBak.startsWith(a + path.sep)) ||
+            !allowed.some(a => realTgt === a || realTgt.startsWith(a + path.sep))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'path outside allowed roots' }))
+          return
+        }
+        if (!fsSync.existsSync(realBak)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: '备份文件不存在' }))
+          return
+        }
+        // 恢复前先备份当前文件
+        if (fsSync.existsSync(realTgt)) {
+          fsSync.copyFileSync(realTgt, `${realTgt}.bak.${Date.now()}`)
+        }
+        fsSync.copyFileSync(realBak, realTgt)
+        console.log(`[file-manager/restore] ${realBak} → ${realTgt}`)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, restored: realTgt.replace(os.homedir(), '~') }))
+      } catch (e) {
+        console.error('[file-manager/restore] error:', e.message)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: e.message }))
+      }
+    })
+    return
+  }
+
+  // ============================================
   // Sprint 6: 费用时间线 API
   // ============================================
 

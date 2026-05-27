@@ -137,6 +137,14 @@
                   :icon="Edit"
                   @click="startEditing"
                 >✏️ 编辑</el-button>
+                <!-- #16 备份恢复按钮（Backup Restore Button）-->
+                <el-button
+                  v-if="isEditable && !selected.isDir"
+                  size="small"
+                  :icon="RefreshLeft"
+                  @click="openBackupPanel"
+                  :loading="loadingBackups"
+                >🗄 备份恢复</el-button>
               </div>
             </div>
             <div class="fm-meta-grid">
@@ -256,6 +264,48 @@
       </div>
     </div>
 
+    <!-- #16 备份列表 Dialog（Backup List Dialog）-->
+    <el-dialog
+      v-model="backupPanelVisible"
+      title="🗄 备份恢复"
+      width="560px"
+      append-to-body
+      :close-on-click-modal="true"
+    >
+      <div class="fm-backup-panel">
+        <div class="fm-backup-file">
+          <el-icon><Document /></el-icon>
+          {{ selected?.cn }} — <span class="mono">{{ selected?.path }}</span>
+        </div>
+        <div v-if="backups.length === 0" class="fm-backup-empty">
+          <el-icon><DocumentRemove /></el-icon>
+          暂无备份文件（编辑保存时会自动创建备份）
+        </div>
+        <div v-else class="fm-backup-list">
+          <div
+            v-for="bk in backups"
+            :key="bk.path"
+            class="fm-backup-item"
+          >
+            <div class="fm-backup-info">
+              <span class="fm-backup-date">{{ bk.date }}</span>
+              <span class="fm-backup-size">{{ formatSize(bk.size) }}</span>
+            </div>
+            <div class="fm-backup-path mono">{{ bk.displayPath }}</div>
+            <el-button
+              size="small"
+              type="warning"
+              :loading="restoringBak === bk.path"
+              @click="restoreBackup(bk)"
+            >↩ 恢复此版本</el-button>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="backupPanelVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 保存后 reset 提示 -->
     <el-dialog
       v-model="resetHintVisible"
@@ -280,7 +330,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import {
   Search, Document, DocumentRemove, Loading, Warning, WarningFilled,
-  ArrowDown, FolderOpened, Position, Edit,
+  ArrowDown, FolderOpened, Position, Edit, RefreshLeft,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
@@ -388,6 +438,65 @@ async function saveFile() {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
+  }
+}
+
+// ── #16 备份恢复（Backup Restore）────────────────────────────────────────────
+interface BackupItem {
+  path: string
+  displayPath: string
+  ts: number
+  date: string
+  size: number
+}
+
+const backupPanelVisible = ref(false)
+const loadingBackups = ref(false)
+const backups = ref<BackupItem[]>([])
+const restoringBak = ref<string>('')
+
+async function openBackupPanel(): Promise<void> {
+  if (!selected.value) return
+  backupPanelVisible.value = true
+  loadingBackups.value = true
+  backups.value = []
+  try {
+    const resp = await fetch(`/api/file-manager/backups?path=${encodeURIComponent(selected.value.path)}`)
+    const data = await resp.json()
+    if (data.ok) {
+      backups.value = data.backups || []
+    } else {
+      ElMessage.error('加载备份列表失败：' + (data.error || '未知错误'))
+    }
+  } catch (e: any) {
+    ElMessage.error('请求失败：' + e.message)
+  } finally {
+    loadingBackups.value = false
+  }
+}
+
+async function restoreBackup(bk: BackupItem): Promise<void> {
+  if (!selected.value) return
+  restoringBak.value = bk.path
+  try {
+    const resp = await fetch('/api/file-manager/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backupPath: bk.path, targetPath: selected.value.path }),
+    })
+    const data = await resp.json()
+    if (data.ok) {
+      ElMessage.success(`✓ 已恢复到 ${bk.date} 的版本（原文件已备份）`)
+      backupPanelVisible.value = false
+      // 重新读取文件内容
+      if (selected.value) await selectFile(selected.value)
+    } else {
+      ElMessage.error('恢复失败：' + (data.error || '未知错误'))
+    }
+  } catch (e: any) {
+    ElMessage.error('请求失败：' + e.message)
+  } finally {
+    restoringBak.value = ''
   }
 }
 
@@ -924,4 +1033,38 @@ const prettifiedJson = computed<string>(() => {
   border-left: 3px solid #3b82f6;
 }
 .fm-reset-sub { font-size: 12px; color: var(--text-secondary); }
+
+/* ─── #16 备份恢复（Backup Restore Panel）──────────────────────────────────── */
+.fm-backup-panel { display: flex; flex-direction: column; gap: 14px; }
+
+.fm-backup-file {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-secondary);
+  padding: 8px 12px; background: rgba(255,255,255,0.04);
+  border-radius: 7px; border: 1px solid var(--border-color);
+}
+.fm-backup-file .mono { color: var(--text-primary); font-family: monospace; font-size: 12px; }
+
+.fm-backup-empty {
+  display: flex; align-items: center; gap: 8px;
+  padding: 24px; justify-content: center;
+  color: var(--text-muted); font-size: 13px;
+}
+
+.fm-backup-list { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; }
+
+.fm-backup-item {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.fm-backup-item:hover { background: rgba(255,255,255,0.07); }
+
+.fm-backup-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.fm-backup-date { font-size: 13px; color: var(--text-primary); font-weight: 500; }
+.fm-backup-size { font-size: 11px; color: var(--text-muted); }
+.fm-backup-path { font-size: 11px; color: #6366f1; font-family: monospace; width: 100%; margin-top: 2px; word-break: break-all; }
 </style>
