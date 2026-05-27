@@ -26,6 +26,70 @@ dotenv.config({ path: path.join(__dirname, '..', '.env') })
 const OPENCLAW_DIR = path.join(process.env.USERPROFILE || process.env.HOME || os.homedir(), '.openclaw')
 const AGENTS_DIR = path.join(OPENCLAW_DIR, 'agents')
 
+// Dashboard dist 备份目录（Version Rollback — 版本回退）
+const DASHBOARD_BACKUPS_DIR = path.join(OPENCLAW_DIR, 'dashboard-backups')
+const DASHBOARD_DIST_DIR = path.join(__dirname, '..', 'dist')
+
+// ── 递归复制目录（用于 dist 备份和恢复）──
+async function copyDirRecursive(src, dest) {
+  await fs.mkdir(dest, { recursive: true })
+  const entries = await fs.readdir(src, { withFileTypes: true })
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name)
+    const destPath = path.join(dest, entry.name)
+    if (entry.isDirectory()) {
+      await copyDirRecursive(srcPath, destPath)
+    } else {
+      await fs.copyFile(srcPath, destPath)
+    }
+  }
+}
+
+// ── 启动时自动备份当前 dist（Startup Auto-Backup）──
+async function backupDistOnStartup() {
+  try {
+    // 检查 dist 目录是否存在（开发模式下可能没有 dist）
+    try { await fs.stat(DASHBOARD_DIST_DIR) } catch { return }
+    // 确保备份目录存在
+    await fs.mkdir(DASHBOARD_BACKUPS_DIR, { recursive: true })
+    // 读取当前版本号
+    let version = 'unknown'
+    try {
+      const pkgContent = await fs.readFile(path.join(__dirname, '..', 'package.json'), 'utf-8')
+      version = JSON.parse(pkgContent).version || 'unknown'
+    } catch { /* 忽略 */ }
+    // 检查是否已有同版本的近期备份（5 分钟内不重复备份）
+    const entries = await fs.readdir(DASHBOARD_BACKUPS_DIR).catch(() => [])
+    const now = Date.now()
+    const FIVE_MIN = 5 * 60 * 1000
+    for (const entry of entries) {
+      const match = entry.match(/^(.+?)_(\d+)$/)
+      if (match && match[1] === version && now - parseInt(match[2], 10) < FIVE_MIN) {
+        console.log(`[dist-backup] 近期已备份过 v${version}，跳过`)
+        return
+      }
+    }
+    const backupName = `${version}_${now}`
+    const backupPath = path.join(DASHBOARD_BACKUPS_DIR, backupName)
+    await copyDirRecursive(DASHBOARD_DIST_DIR, backupPath)
+    console.log(`[dist-backup] ✅ 已备份 dist v${version} → ${backupPath}`)
+    // 保留最近 20 个备份，超出则删除最旧的
+    const allEntries = await fs.readdir(DASHBOARD_BACKUPS_DIR).catch(() => [])
+    const validEntries = allEntries
+      .map(e => { const m = e.match(/^(.+?)_(\d+)$/); return m ? { name: e, ts: parseInt(m[2], 10) } : null })
+      .filter(Boolean)
+      .sort((a, b) => b.ts - a.ts)
+    if (validEntries.length > 20) {
+      for (const old of validEntries.slice(20)) {
+        await fs.rm(path.join(DASHBOARD_BACKUPS_DIR, old.name), { recursive: true, force: true }).catch(() => {})
+        console.log(`[dist-backup] 清理旧备份：${old.name}`)
+      }
+    }
+  } catch (e) {
+    console.warn(`[dist-backup] 备份失败（不影响服务启动）:`, e.message)
+  }
+}
+
 // ===== Sprint 7: 全局搜索 SQLite 索引 =====
 const SEARCH_DB_PATH = path.join(OPENCLAW_DIR, 'search-index.db')
 let _searchDb = null
@@ -4063,6 +4127,116 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // GET /api/system/dist-backups — 列出 dist 备份（Dist Backup List）
+  // ============================================
+  if (pathname === '/api/system/dist-backups' && req.method === 'GET') {
+    try {
+      await fs.mkdir(DASHBOARD_BACKUPS_DIR, { recursive: true })
+      const entries = await fs.readdir(DASHBOARD_BACKUPS_DIR)
+      const backups = []
+      for (const entry of entries) {
+        const fullPath = path.join(DASHBOARD_BACKUPS_DIR, entry)
+        let stat
+        try { stat = await fs.stat(fullPath) } catch { continue }
+        if (!stat.isDirectory()) continue
+        // 目录名格式：{version}_{timestamp_ms}
+        const match = entry.match(/^(.+?)_(\d+)$/)
+        if (!match) continue
+        const [, version, tsStr] = match
+        const ts = parseInt(tsStr, 10)
+        const d = new Date(ts)
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+        // 计算目录大小
+        let totalBytes = 0
+        try {
+          const walkDir = async (dir) => {
+            const items = await fs.readdir(dir)
+            for (const item of items) {
+              const itemPath = path.join(dir, item)
+              const s = await fs.stat(itemPath)
+              if (s.isDirectory()) await walkDir(itemPath)
+              else totalBytes += s.size
+            }
+          }
+          await walkDir(fullPath)
+        } catch { /* 忽略大小计算失败 */ }
+        const sizeDisplay = totalBytes > 1024 * 1024
+          ? `${(totalBytes / 1024 / 1024).toFixed(1)} MB`
+          : `${(totalBytes / 1024).toFixed(0)} KB`
+        backups.push({ path: fullPath, version, ts, date: dateStr, sizeDisplay })
+      }
+      // 按时间倒序（最新在前）
+      backups.sort((a, b) => b.ts - a.ts)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ backups }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message, backups: [] }))
+    }
+    return
+  }
+
+  // ============================================
+  // POST /api/system/dist-rollback — 恢复 dist 备份（Dist Rollback）
+  // body: { backupPath: string }
+  // ============================================
+  if (pathname === '/api/system/dist-rollback' && req.method === 'POST') {
+    let body = ''
+    req.on('data', c => body += c)
+    req.on('end', async () => {
+      try {
+        const { backupPath } = JSON.parse(body || '{}')
+        if (!backupPath || typeof backupPath !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'backupPath is required' }))
+          return
+        }
+        // 安全检查：备份路径必须在 DASHBOARD_BACKUPS_DIR 下
+        const normalBackup = path.resolve(backupPath)
+        if (!normalBackup.startsWith(path.resolve(DASHBOARD_BACKUPS_DIR))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Invalid backup path' }))
+          return
+        }
+        // 检查备份目录是否存在
+        try { await fs.stat(normalBackup) } catch {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Backup not found' }))
+          return
+        }
+        // 先把当前 dist 也备份一次（"回退前先保存现状"）
+        const nowTs = Date.now()
+        let curVersion = 'unknown'
+        try {
+          const pkgPath = path.join(__dirname, '..', 'package.json')
+          const pkgContent = await fs.readFile(pkgPath, 'utf-8')
+          curVersion = JSON.parse(pkgContent).version || 'unknown'
+        } catch { /* 忽略 */ }
+        const preSaveName = `${curVersion}_${nowTs}`
+        const preSavePath = path.join(DASHBOARD_BACKUPS_DIR, preSaveName)
+        try {
+          await copyDirRecursive(DASHBOARD_DIST_DIR, preSavePath)
+          console.log(`[dist-rollback] 回退前自动备份当前 dist → ${preSavePath}`)
+        } catch (saveErr) {
+          console.warn(`[dist-rollback] 回退前备份当前 dist 失败（继续执行回退）:`, saveErr.message)
+        }
+        // 清空当前 dist
+        try { await fs.rm(DASHBOARD_DIST_DIR, { recursive: true, force: true }) } catch { /* 忽略 */ }
+        // 将备份复制回 dist
+        await copyDirRecursive(normalBackup, DASHBOARD_DIST_DIR)
+        console.log(`[dist-rollback] 已成功恢复备份 ${backupPath} → ${DASHBOARD_DIST_DIR}`)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, message: '回退成功，请刷新页面' }))
+      } catch (e) {
+        console.error('[dist-rollback] 错误:', e.message)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: e.message }))
+      }
+    })
+    return
+  }
+
+  // ============================================
   // 404 for other routes
   // ============================================
 
@@ -4095,7 +4269,12 @@ server.listen(PORT, () => {
   console.log('  POST /api/system/doctor          - 执行 openclaw doctor 诊断')
   console.log('  POST /reset                     - 重置 Agent')
   console.log('  POST /api/upload-image           - 图片上传 (base64, ≤5MB)')
+  console.log('  GET  /api/system/dist-backups    - 列出 dist 备份（版本回退）')
+  console.log('  POST /api/system/dist-rollback   - 恢复 dist 备份（版本回退）')
   console.log('')
+
+  // 启动后自动备份当前 dist（异步，不阻塞服务）
+  backupDistOnStartup()
 })
 
 // 优雅关闭

@@ -1,0 +1,234 @@
+{
+  "versions": [
+    {
+      "version": "1.18.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 10",
+      "emoji": "📋",
+      "summary": "版本迭代说明 + 版本回退",
+      "features": [
+        "新增版本迭代说明面板（Changelog Panel）：内嵌到工作台，展示从安装至今每个版本的功能更新",
+        "新增版本回退功能（Version Rollback）：服务启动时自动备份 dist 目录，出问题可一键恢复",
+        "布局设置新增「版本历史」模块开关（可在自定义布局中控制显示/隐藏）",
+        "版本面板支持折叠/展开，与活动时间线风格一致"
+      ]
+    },
+    {
+      "version": "1.17.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 9",
+      "emoji": "📈",
+      "summary": "内联时间线 + 布局三模块",
+      "features": [
+        "活动时间线（Activity Timeline）从弹窗移至工作台主页内嵌，支持折叠/展开",
+        "自定义布局扩展为三模块：功能区按钮顺序 / 统计卡片顺序 / 内嵌视图显示",
+        "移除布局设置中的 GPU 显存项（条件显示，无需参与排序）",
+        "内嵌视图可通过开关单独控制，配置持久化到 localStorage"
+      ]
+    },
+    {
+      "version": "1.16.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 9 · #16",
+      "emoji": "🗄️",
+      "summary": "文件管理备份恢复",
+      "features": [
+        "文件管理器新增「备份恢复」功能（Backup Restore）：每次保存自动创建 .bak.{时间戳} 备份文件",
+        "支持列出所有历史备份（按时间倒序），一键恢复指定版本",
+        "新增后端 API：GET /api/file-manager/backups 和 POST /api/file-manager/restore"
+      ]
+    },
+    {
+      "version": "1.15.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 9 · #17",
+      "emoji": "💬",
+      "summary": "@ 提及功能",
+      "features": [
+        "Agent 抽屉（Agent Detail Drawer）聊天输入框支持 @ 提及（Mention Dropdown）",
+        "输入 @ 自动弹出 agent 选择列表，支持键盘上下导航 + 回车/Tab 确认",
+        "提及列表显示 agent 头像、名称、ID，支持按名称和 ID 模糊搜索"
+      ]
+    },
+    {
+      "version": "1.14.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 9 · #18",
+      "emoji": "🌙",
+      "summary": "暗色/亮色主题切换",
+      "features": [
+        "顶部状态栏新增主题切换按钮（Dark/Light Theme Toggle）：☀️ 亮色 / 🌙 暗色",
+        "全站 CSS 变量（CSS Variables）支持双主题，Element Plus 组件自动适配",
+        "主题偏好存储到 localStorage，下次打开自动恢复；也支持自动跟随系统偏好"
+      ]
+    },
+    {
+      "version": "1.13.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 9 · #6",
+      "emoji": "⚡",
+      "summary": "快捷消息发送 FAB",
+      "features": [
+        "页面右下角新增悬浮操作按钮（FAB — Floating Action Button）⚡",
+        "点击即可向任意 agent 发送消息，无需打开抽屉面板",
+        "内置每个 agent 的快捷消息模板（汇报状态、检查进度、执行任务等）",
+        "全局快捷键 ⌘⇧M 快速唤起，支持发送后自动关闭"
+      ]
+    },
+    {
+      "version": "1.12.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 8",
+      "emoji": "🔍",
+      "summary": "搜索 / 技能 / Token / 诊断全面升级",
+      "features": [
+        "全局搜索（Global Search ⌘K）全面升级：支持 SQLite FTS5 全文索引（Full-Text Search）、高亮显示",
+        "技能库新增调用排行榜（Skill Usage Leaderboard）：显示最近 30 天各技能调用次数",
+        "Token 消耗详情（Token Detail Dialog）支持按 agent 和模型筛选，饼图可视化",
+        "网关诊断工具（Gateway Doctor）升级：更详细的诊断报告和修复建议"
+      ]
+    },
+    {
+      "version": "1.11.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 7",
+      "emoji": "🔎",
+      "summary": "全局搜索 + 活动时间线",
+      "features": [
+        "新增全局搜索（Command Palette ⌘K）：搜索所有 agent 的对话历史",
+        "新增活动时间线（Activity Timeline）：Gantt 图展示 agent 并发活动，可按时间范围筛选",
+        "SQLite 全文搜索索引（FTS — Full Text Search）支持，自动增量更新",
+        "活动时间线支持 1h / 4h / 24h 时间范围切换"
+      ]
+    },
+    {
+      "version": "1.10.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 6",
+      "emoji": "📋",
+      "summary": "项目看板 + Cron 中心",
+      "features": [
+        "新增项目看板（Project Board）：5 列看板（待开始/进行中/测试中/已完成/已归档）追踪项目进度",
+        "新增 Cron 任务中心（Cron Center）：管理所有 agent 的定时任务",
+        "项目状态与 state.json 实时同步，支持按 agent 过滤",
+        "Cron 任务支持启用/禁用/立即运行/删除"
+      ]
+    },
+    {
+      "version": "1.9.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 5",
+      "emoji": "💰",
+      "summary": "计费系统 + 费用统计",
+      "features": [
+        "新增计费配置（Billing Config）：按模型自定义每千 token 单价",
+        "费用统计卡片：显示本次运行费用 + 今日/月度预估",
+        "费用时间线（Cost Timeline）：历史费用趋势图",
+        "支持导入/导出计费配置"
+      ]
+    },
+    {
+      "version": "1.8.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 4",
+      "emoji": "📁",
+      "summary": "文件管理器",
+      "features": [
+        "新增文件管理器（File Manager）：浏览系统目录树，查看/编辑文件",
+        "支持代码高亮显示（Code Highlight），多种编程语言自动识别",
+        "文件编辑支持保存，自动创建备份",
+        "支持二进制文件检测，安全跳过无法显示的文件"
+      ]
+    },
+    {
+      "version": "1.7.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 3",
+      "emoji": "🤖",
+      "summary": "Agent 详情抽屉",
+      "features": [
+        "新增 Agent 详情抽屉（Agent Detail Drawer）：点击 agent 卡片展开，查看完整对话历史",
+        "实时聊天：在抽屉内直接向 agent 发消息，无需切换到 WebUI",
+        "Token 使用量展示（按 session 汇总），支持查看全部历史会话"
+      ]
+    },
+    {
+      "version": "1.6.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 2",
+      "emoji": "🧰",
+      "summary": "技能库管理",
+      "features": [
+        "新增技能库（Skills Library）：管理所有 agent 技能（Skills）",
+        "技能对比矩阵（Skill Comparison Matrix）：查看各 agent 的技能分布和重叠情况",
+        "支持技能启用/禁用（Enable/Disable），状态三色标识",
+        "支持从 ClawHub 搜索和安装新技能"
+      ]
+    },
+    {
+      "version": "1.5.0",
+      "date": "2026-05-27",
+      "tag": "Sprint 1",
+      "emoji": "📊",
+      "summary": "看板布局 + 统计卡片",
+      "features": [
+        "Agent 状态看板：5 列布局（空闲/运行中/已终止/错误/未知）",
+        "统计卡片：总计、运行中、空闲、已终止、错误、运行时间、Token 消耗",
+        "自定义布局（Layout Settings）：可拖拽排序功能按钮和统计卡片",
+        "网关健康检测（Gateway Health）：实时轮询，异常自动提示"
+      ]
+    },
+    {
+      "version": "1.4.0",
+      "date": "2026-05-27",
+      "tag": "早期版本",
+      "emoji": "🚀",
+      "summary": "WebUI 跳转 + 版本管理",
+      "features": [
+        "新增 WebUI 跳转按钮：在 Dashboard 内直接打开 OpenClaw 原生界面（并自动登录）",
+        "OpenClaw 版本管理（Version Manager）：查看历史版本，一键切换/回退",
+        "网关诊断工具（Gateway Doctor）：自动检测并修复常见问题"
+      ]
+    },
+    {
+      "version": "1.3.0",
+      "date": "2026-05-25",
+      "tag": "早期版本",
+      "emoji": "🎯",
+      "summary": "实时活动监控 + UI 全面升级",
+      "features": [
+        "实时活动监控（Live Activity）：显示 agent 当前正在执行的工具调用",
+        "技能对比矩阵：所有 agent 技能一览对比",
+        "UI 全面升级：暗色主题、渐变卡片、动态状态指示器",
+        "Agent 卡片显示头像（支持 emoji 和图片）"
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-05-25",
+      "tag": "早期版本",
+      "emoji": "🔧",
+      "summary": "技能库 + Agent 抽屉升级",
+      "features": [
+        "技能库从右侧面板重构为聊天区 Header 内联弹出面板",
+        "Agent 抽屉集成专属技能面板",
+        "修复 WebUI 自动登录问题",
+        "修复 iconv-lite 依赖缺失问题"
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "date": "2026-05-24",
+      "tag": "初始版本",
+      "emoji": "🌱",
+      "summary": "Dashboard 初始版本",
+      "features": [
+        "OpenClaw 监控台初始版本上线",
+        "Agent 状态实时监控（运行中/空闲/错误）",
+        "消息类型过滤功能（Filter by message type）",
+        "工作流进度步进条（Workflow Progress Stepper）",
+        "通知中心（Notification Center）"
+      ]
+    }
+  ]
+}

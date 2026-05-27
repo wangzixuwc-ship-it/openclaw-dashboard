@@ -285,6 +285,28 @@
       </div>
     </section>
 
+    <!-- ========= 3.6 内联版本迭代说明（Inline Changelog Panel，可折叠）=========
+         layoutConfig.sections.changelog 控制是否显示（可在自定义布局关闭）
+    -->
+    <section
+      v-if="layoutConfig.sections?.changelog !== false"
+      class="inline-changelog-section"
+      :class="{ collapsed: layoutConfig.changelogCollapsed }"
+    >
+      <!-- 折叠栏头 -->
+      <div class="icl-bar" @click="toggleChangelogCollapsed()">
+        <span class="icl-bar-icon">📋</span>
+        <span class="icl-bar-label">版本迭代说明</span>
+        <span class="icl-bar-hint">Changelog · 版本回退</span>
+        <span class="icl-bar-badge">v{{ APP_VERSION }}</span>
+        <span class="icl-bar-arrow">{{ layoutConfig.changelogCollapsed ? '▶' : '▼' }}</span>
+      </div>
+      <!-- 折叠内容 -->
+      <div v-show="!layoutConfig.changelogCollapsed" class="icl-content">
+        <ChangelogPanel />
+      </div>
+    </section>
+
     <!-- ========= 4. 看板主体（5列：空闲/运行中/已终止/错误/未知） ========= -->
     <main class="board-container">
       <!-- 空闲列 -->
@@ -487,6 +509,7 @@ import ProjectBoardDialog from '../components/ProjectBoardDialog.vue'
 import CronCenterDialog from '../components/CronCenterDialog.vue'
 import CommandPaletteDialog from '../components/CommandPaletteDialog.vue'
 import ActivityTimelineDialog from '../components/ActivityTimelineDialog.vue'
+import ChangelogPanel from '../components/ChangelogPanel.vue'
 import QuickMsgFab from '../components/QuickMsgFab.vue'
 import { useLayoutSettings } from '../composables/useLayoutSettings'
 import { useTheme } from '../composables/useTheme'
@@ -600,7 +623,7 @@ const billingDialogVisible = ref(false)
 const fileManagerVisible = ref(false)
 
 // 自定义布局
-const { config: layoutConfig, toggleTimelineCollapsed } = useLayoutSettings()
+const { config: layoutConfig, toggleTimelineCollapsed, toggleChangelogCollapsed } = useLayoutSettings()
 const layoutDialogVisible = ref(false)
 
 // 项目看板
@@ -1089,6 +1112,65 @@ onUnmounted(() => {
 /* 折叠内容区 */
 .itl-content {
   overflow: hidden;
+}
+
+/* ── 内联版本迭代说明（Inline Changelog Section）── */
+.inline-changelog-section {
+  background: var(--bg-secondary, #1e293b);
+  border-top: 1px solid var(--border-color, #334155);
+  border-bottom: 1px solid var(--border-color, #334155);
+  margin-bottom: 4px;
+}
+
+.icl-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 24px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.icl-bar:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.icl-bar-icon { font-size: 14px; }
+
+.icl-bar-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #f1f5f9);
+}
+
+.icl-bar-hint {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+}
+
+.icl-bar-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(139,92,246,0.15);
+  color: #8b5cf6;
+  border: 1px solid rgba(139,92,246,0.25);
+  font-weight: 600;
+}
+
+.icl-bar-arrow {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted, #64748b);
+  transition: transform 0.2s;
+}
+
+.icl-content {
+  overflow: hidden;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 24px 12px;
 }
 
 .action-bar-section {

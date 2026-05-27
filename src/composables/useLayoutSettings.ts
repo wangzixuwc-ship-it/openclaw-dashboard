@@ -24,7 +24,8 @@ const DEFAULT_STATS_CARDS: string[] = [
 
 // ── 第三模块：内嵌视图可见性（Inline Section Visibility）──
 const DEFAULT_SECTIONS: Record<string, boolean> = {
-  timeline: true, // 活动时间线 Gantt 图（默认展开）
+  timeline:  true, // 活动时间线 Gantt 图（默认展开）
+  changelog: true, // 版本迭代说明 Changelog（默认展开）
 }
 
 const STORAGE_KEY = 'openclaw_dashboard_layout_v2'
@@ -34,6 +35,7 @@ interface LayoutConfig {
   statsCards: string[]
   sections: Record<string, boolean>
   timelineCollapsed: boolean
+  changelogCollapsed: boolean
 }
 
 function loadFromStorage(): LayoutConfig {
@@ -48,6 +50,7 @@ function loadFromStorage(): LayoutConfig {
         statsCards: [...DEFAULT_STATS_CARDS],
         sections: { ...DEFAULT_SECTIONS },
         timelineCollapsed: false,
+        changelogCollapsed: false,
       }
     }
     const sb = mergeWithDefault(source.statusBar, DEFAULT_STATUS_BAR)
@@ -58,6 +61,7 @@ function loadFromStorage(): LayoutConfig {
       statsCards: sc,
       sections: sec,
       timelineCollapsed: source.timelineCollapsed ?? false,
+      changelogCollapsed: source.changelogCollapsed ?? false,
     }
   } catch {
     return {
@@ -65,6 +69,7 @@ function loadFromStorage(): LayoutConfig {
       statsCards: [...DEFAULT_STATS_CARDS],
       sections: { ...DEFAULT_SECTIONS },
       timelineCollapsed: false,
+      changelogCollapsed: false,
     }
   }
 }
@@ -107,12 +112,17 @@ function toggleTimelineCollapsed() {
   config.value.timelineCollapsed = !config.value.timelineCollapsed
 }
 
+function toggleChangelogCollapsed() {
+  config.value.changelogCollapsed = !config.value.changelogCollapsed
+}
+
 function resetToDefault() {
   config.value = {
     statusBar: [...DEFAULT_STATUS_BAR],
     statsCards: [...DEFAULT_STATS_CARDS],
     sections: { ...DEFAULT_SECTIONS },
     timelineCollapsed: false,
+    changelogCollapsed: false,
   }
 }
 
@@ -128,6 +138,7 @@ export function useLayoutSettings() {
     setStatsCardsOrder,
     setSectionVisible,
     toggleTimelineCollapsed,
+    toggleChangelogCollapsed,
     resetToDefault,
     toggleEditMode,
     DEFAULT_STATUS_BAR,

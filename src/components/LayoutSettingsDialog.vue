@@ -161,7 +161,8 @@ const statsCardsMeta: Record<string, { icon: string; label: string; desc: string
 
 // ── 第三模块元数据 ──
 const sectionsMeta = [
-  { id: 'timeline', icon: '📈', label: '活动时间线', desc: 'Gantt 图内嵌展示（可折叠）' },
+  { id: 'timeline',  icon: '📈', label: '活动时间线',   desc: 'Gantt 图内嵌展示（可折叠）' },
+  { id: 'changelog', icon: '📋', label: '版本迭代说明', desc: 'Changelog 版本历史 + 回退（可折叠）' },
 ]
 
 // ── 排序 ──
