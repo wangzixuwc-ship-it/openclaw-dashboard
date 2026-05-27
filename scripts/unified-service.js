@@ -14,6 +14,7 @@ import { spawn, execSync } from 'child_process'
 import iconv from 'iconv-lite'
 import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
+import { DatabaseSync } from 'node:sqlite'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -24,6 +25,144 @@ dotenv.config({ path: path.join(__dirname, '..', '.env') })
 // OpenClaw 数据目录
 const OPENCLAW_DIR = path.join(process.env.USERPROFILE || process.env.HOME || os.homedir(), '.openclaw')
 const AGENTS_DIR = path.join(OPENCLAW_DIR, 'agents')
+
+// ===== Sprint 7: 全局搜索 SQLite 索引 =====
+const SEARCH_DB_PATH = path.join(OPENCLAW_DIR, 'search-index.db')
+let _searchDb = null
+
+function getSearchDb() {
+  if (_searchDb) return _searchDb
+  try {
+    _searchDb = new DatabaseSync(SEARCH_DB_PATH)
+    _searchDb.exec(`
+      PRAGMA journal_mode = WAL;
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        timestamp TEXT DEFAULT '',
+        file_path TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_fp ON messages(file_path);
+      CREATE INDEX IF NOT EXISTS idx_ts ON messages(timestamp);
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        content, content='messages', content_rowid='id'
+      );
+      CREATE TRIGGER IF NOT EXISTS msg_ai AFTER INSERT ON messages BEGIN
+        INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS msg_ad AFTER DELETE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+      END;
+      CREATE TABLE IF NOT EXISTS indexed_files (
+        path TEXT PRIMARY KEY,
+        mtime_ms INTEGER NOT NULL,
+        message_count INTEGER DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+    `)
+    return _searchDb
+  } catch (e) {
+    console.error('[search-db] init error:', e.message)
+    _searchDb = null
+    return null
+  }
+}
+
+function doIndexMessages(opts = {}) {
+  const { rebuild = false } = opts
+  const db = getSearchDb()
+  if (!db) return { error: 'SQLite unavailable' }
+
+  if (rebuild) {
+    db.exec('DELETE FROM messages; DELETE FROM indexed_files;')
+    db.exec("INSERT OR REPLACE INTO messages_fts(messages_fts) VALUES('rebuild')")
+  }
+
+  const getIndexed = db.prepare('SELECT mtime_ms FROM indexed_files WHERE path = ?')
+  const upsertIndexed = db.prepare('INSERT OR REPLACE INTO indexed_files (path, mtime_ms, message_count) VALUES (?, ?, ?)')
+  const deleteMsgs = db.prepare('DELETE FROM messages WHERE file_path = ?')
+  const insertMsg = db.prepare('INSERT INTO messages (agent_id, session_id, role, content, timestamp, file_path) VALUES (?, ?, ?, ?, ?, ?)')
+
+  let newFiles = 0, updatedFiles = 0, skippedFiles = 0, totalMessages = 0
+
+  try {
+    const agentIds = fsSync.readdirSync(AGENTS_DIR)
+    for (const agentId of agentIds) {
+      const sessDir = path.join(AGENTS_DIR, agentId, 'sessions')
+      let files
+      try { files = fsSync.readdirSync(sessDir) } catch { continue }
+
+      for (const f of files) {
+        if (!f.endsWith('.jsonl')) continue
+        if (f.includes('.trajectory') || f.includes('.bak') || f.includes('.tmp')) continue
+        if (f === 'sessions.json') continue
+        const filePath = path.join(sessDir, f)
+        const sessionId = f.replace('.jsonl', '')
+        try {
+          const stat = fsSync.statSync(filePath)
+          const mtime = Math.round(stat.mtimeMs)
+          const indexed = getIndexed.get(filePath)
+          if (indexed && indexed.mtime_ms === mtime) { skippedFiles++; continue }
+          if (indexed) { deleteMsgs.run(filePath); updatedFiles++ }
+          else { newFiles++ }
+
+          const lines = fsSync.readFileSync(filePath, 'utf8').split('\n')
+          let msgCount = 0
+          db.exec('BEGIN')
+          try {
+            for (const line of lines) {
+              if (!line.trim()) continue
+              let d
+              try { d = JSON.parse(line) } catch { continue }
+              if (d.type !== 'message') continue
+              const msg = d.message || {}
+              const role = msg.role || ''
+              if (role === 'system') continue
+              let text = ''
+              const content = msg.content
+              if (typeof content === 'string') text = content
+              else if (Array.isArray(content)) {
+                text = content.map(c => {
+                  if (typeof c === 'string') return c
+                  if (c?.type === 'text') return c.text || ''
+                  if (c?.type === 'tool_result') {
+                    const inner = c.content
+                    if (typeof inner === 'string') return inner
+                    if (Array.isArray(inner)) return inner.map(x => x?.text || '').join(' ')
+                  }
+                  return ''
+                }).join(' ')
+              }
+              text = text.trim()
+              if (text.length < 3) continue
+              if (text.length > 2000) text = text.slice(0, 2000)
+              insertMsg.run(agentId, sessionId, role, text, d.timestamp || '', filePath)
+              msgCount++
+            }
+            db.exec('COMMIT')
+          } catch (e2) {
+            db.exec('ROLLBACK')
+            console.error('[search-index] tx error:', e2.message)
+          }
+          upsertIndexed.run(filePath, mtime, msgCount)
+          totalMessages += msgCount
+        } catch (e3) {
+          console.warn('[search-index] file skip:', filePath, e3.message)
+        }
+      }
+    }
+  } catch (e) {
+    return { error: e.message, newFiles, updatedFiles, skippedFiles, totalMessages }
+  }
+
+  const total = db.prepare('SELECT COUNT(*) as n FROM messages').get()
+  db.prepare("INSERT OR REPLACE INTO meta VALUES ('last_indexed_at', ?)").run(new Date().toISOString())
+  return { newFiles, updatedFiles, skippedFiles, totalMessages, totalInDb: total?.n || 0 }
+}
+// ===== END Sprint 7 init =====
 
 // 端口号
 const PORT = 31002
@@ -3421,6 +3560,183 @@ const server = http.createServer(async (req, res) => {
         })
       } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })) }
     })
+    return
+  }
+
+  // ============================================
+  // Sprint 7: GET /api/search — 全文搜索
+  // ============================================
+  if (pathname === '/api/search' && req.method === 'GET') {
+    try {
+      const q = (url.searchParams.get('q') || '').trim()
+      const type = url.searchParams.get('type') || 'all'
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50)
+      const results = { agents: [], messages: [] }
+
+      if (!q) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ results, q, total: 0 }))
+        return
+      }
+
+      const qLower = q.toLowerCase()
+
+      // Agent search (instant, from config)
+      if (type === 'all' || type === 'agents') {
+        try {
+          const configPath = path.join(OPENCLAW_DIR, 'openclaw.json')
+          const config = JSON.parse(fsSync.readFileSync(configPath, 'utf8'))
+          const agentList = Array.isArray(config.agents) ? config.agents : []
+          for (const a of agentList) {
+            const name = (a.name || a.id || '').toLowerCase()
+            if (name.includes(qLower) || (a.id || '').includes(qLower)) {
+              results.agents.push({ id: a.id, name: a.name || a.id, emoji: a.emoji || '', model: a.model || '' })
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      // FTS message search
+      if (type === 'all' || type === 'messages') {
+        try {
+          const db = getSearchDb()
+          if (db) {
+            // Escape FTS5 special chars, add prefix wildcard for partial match
+            const ftsQ = q.replace(/["'*^()]/g, ' ').trim().split(/\s+/).filter(Boolean).map(w => `"${w}"*`).join(' ')
+            if (ftsQ) {
+              const rows = db.prepare(`
+                SELECT m.agent_id, m.session_id, m.role, m.timestamp,
+                  snippet(messages_fts, 0, '<mark>', '</mark>', '…', 20) AS snippet
+                FROM messages_fts
+                JOIN messages m ON m.id = messages_fts.rowid
+                WHERE messages_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+              `).all(ftsQ, limit)
+              results.messages = rows
+            }
+          }
+        } catch (e) {
+          console.warn('[search] FTS error:', e.message)
+          results.messages = []
+        }
+      }
+
+      const total = results.agents.length + results.messages.length
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ results, q, total }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
+  // ============================================
+  // Sprint 7: POST /api/search/index — 触发索引
+  // ============================================
+  if (pathname === '/api/search/index' && req.method === 'POST') {
+    let body = ''
+    req.on('data', d => body += d)
+    req.on('end', () => {
+      try {
+        const opts = body ? JSON.parse(body) : {}
+        console.log('[search-index] build start, rebuild=', !!opts.rebuild)
+        const result = doIndexMessages({ rebuild: !!opts.rebuild })
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: e.message }))
+      }
+    })
+    return
+  }
+
+  // ============================================
+  // Sprint 7: GET /api/search/status — 索引状态
+  // ============================================
+  if (pathname === '/api/search/status' && req.method === 'GET') {
+    try {
+      const db = getSearchDb()
+      if (!db) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'SQLite unavailable', totalMessages: 0, totalFiles: 0 }))
+        return
+      }
+      const total = db.prepare('SELECT COUNT(*) as n FROM messages').get()
+      const files = db.prepare('SELECT COUNT(*) as n FROM indexed_files').get()
+      const lastAt = db.prepare("SELECT value FROM meta WHERE key='last_indexed_at'").get()
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, totalMessages: total?.n || 0, totalFiles: files?.n || 0, lastIndexedAt: lastAt?.value || null }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
+  // ============================================
+  // Sprint 7: GET /api/activity-timeline — Gantt 时间线
+  // ============================================
+  if (pathname === '/api/activity-timeline' && req.method === 'GET') {
+    try {
+      const hours = Math.min(parseInt(url.searchParams.get('hours') || '24'), 24 * 30)
+      const since = Date.now() - hours * 3600 * 1000
+      const sessions = []
+
+      try {
+        const agentIds = fsSync.readdirSync(AGENTS_DIR)
+        for (const agentId of agentIds) {
+          const sessDir = path.join(AGENTS_DIR, agentId, 'sessions')
+          let files
+          try { files = fsSync.readdirSync(sessDir) } catch { continue }
+
+          for (const f of files) {
+            if (!f.endsWith('.trajectory.jsonl')) continue
+            const filePath = path.join(sessDir, f)
+            try {
+              const stat = fsSync.statSync(filePath)
+              if (stat.mtimeMs < since) continue // quick filter
+
+              const lines = fsSync.readFileSync(filePath, 'utf8').split('\n').filter(l => l.trim())
+              let startTs = null, endTs = null, trigger = 'user'
+
+              for (const line of lines) {
+                try {
+                  const d = JSON.parse(line)
+                  if (d.type === 'session.started') { startTs = d.ts; trigger = d.data?.trigger || 'user' }
+                  else if (d.type === 'session.ended') endTs = d.ts
+                } catch { }
+              }
+
+              if (!startTs) continue
+              const startMs = new Date(startTs).getTime()
+              if (startMs < since) continue
+
+              const endMs = endTs ? new Date(endTs).getTime() : Math.min(stat.mtimeMs, Date.now())
+              sessions.push({
+                agentId,
+                sessionId: f.replace('.trajectory.jsonl', ''),
+                startTs, endTs: endTs || null,
+                startMs, endMs,
+                durationMs: Math.max(endMs - startMs, 0),
+                trigger,
+              })
+            } catch { }
+          }
+        }
+      } catch (e) {
+        console.error('[activity-timeline] scan error:', e.message)
+      }
+
+      sessions.sort((a, b) => a.startMs - b.startMs)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ sessions, hours, generatedAt: Date.now(), total: sessions.length }))
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: e.message }))
+    }
     return
   }
 

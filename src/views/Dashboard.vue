@@ -74,6 +74,23 @@
             </template>
           </el-popover>
 
+          <!-- Sprint 7: 全局搜索 cmd+K -->
+          <el-tooltip content="全局搜索（⌘K）" placement="bottom">
+            <button class="top-indicator top-indicator-search" @click="commandPaletteVisible = true">
+              <el-icon :size="13"><Search /></el-icon>
+              <span class="top-ind-label">搜索</span>
+              <kbd class="top-ind-kbd">⌘K</kbd>
+            </button>
+          </el-tooltip>
+
+          <!-- Sprint 7: 活动时间线 -->
+          <el-tooltip content="活动时间线 Gantt 图" placement="bottom">
+            <button class="top-indicator top-indicator-timeline" @click="activityTimelineVisible = true">
+              <el-icon :size="13"><DataLine /></el-icon>
+              <span class="top-ind-label">时间线</span>
+            </button>
+          </el-tooltip>
+
           <!-- 自定义布局 -->
           <el-tooltip content="自定义布局：排序功能按钮 / 统计卡片" placement="bottom">
             <button class="top-layout-btn" @click="layoutDialogVisible = true">
@@ -402,6 +419,14 @@
     <!-- Cron 任务中心 Dialog -->
     <CronCenterDialog v-model:visible="cronCenterVisible" />
 
+    <!-- Sprint 7: 命令面板 + 活动时间线 -->
+    <CommandPaletteDialog
+      v-model="commandPaletteVisible"
+      @open-action="handlePaletteAction"
+      @navigate-agent="handlePaletteNavigateAgent"
+    />
+    <ActivityTimelineDialog v-model="activityTimelineVisible" />
+
     <!-- REC-011: 加载超时提示 -->
     <el-alert
       v-if="loadingHintVisible"
@@ -434,6 +459,8 @@ import FileManagerDialog from '../components/FileManagerDialog.vue'
 import LayoutSettingsDialog from '../components/LayoutSettingsDialog.vue'
 import ProjectBoardDialog from '../components/ProjectBoardDialog.vue'
 import CronCenterDialog from '../components/CronCenterDialog.vue'
+import CommandPaletteDialog from '../components/CommandPaletteDialog.vue'
+import ActivityTimelineDialog from '../components/ActivityTimelineDialog.vue'
 import { useLayoutSettings } from '../composables/useLayoutSettings'
 import { type WorkflowData } from '../data/workflow-steps'
 import {
@@ -455,7 +482,9 @@ import {
   Box,
   Link,
   Grid,
-  Timer
+  Timer,
+  Search,
+  DataLine
 } from '@element-plus/icons-vue'
 // el import removed (unused)
 
@@ -553,6 +582,10 @@ const projectSummary = ref('查看项目进度')
 
 // Cron 任务中心
 const cronCenterVisible = ref(false)
+
+// Sprint 7: 命令面板 + 活动时间线
+const commandPaletteVisible = ref(false)
+const activityTimelineVisible = ref(false)
 
 function statusBarOrder(id: string): number {
   const idx = layoutConfig.value.statusBar.indexOf(id)
@@ -698,6 +731,33 @@ async function refreshAll(): Promise<void> {
   await Promise.all([store.fetchAgents(), store.fetchHealth()])
 }
 
+// Sprint 7: cmd+K global shortcut
+function onGlobalKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault()
+    commandPaletteVisible.value = !commandPaletteVisible.value
+  }
+}
+
+function handlePaletteAction(key: string) {
+  switch (key) {
+    case 'projects':     projectBoardVisible.value = true; break
+    case 'cron':         cronCenterVisible.value = true; break
+    case 'timeline':     activityTimelineVisible.value = true; break
+    case 'fileManager':  fileManagerVisible.value = true; break
+    case 'billing':      billingDialogVisible.value = true; break
+    case 'skills':       skillsDialogVisible.value = true; break
+    case 'token':        tokenDetailVisible.value = true; break
+    default: break
+  }
+}
+
+function handlePaletteNavigateAgent(agentId: string) {
+  // Scroll to the agent card
+  const el = document.querySelector(`[data-agent-id="${agentId}"]`)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
 onMounted(() => {
   refreshAll()
   store.subscribeAgents()
@@ -710,6 +770,8 @@ onMounted(() => {
   // REC-011: 加载超时提示 — 每 1 秒检查
   checkLoadingHint()
   loadingCheckTimer = setInterval(checkLoadingHint, 1000)
+  // Sprint 7: cmd+K
+  window.addEventListener('keydown', onGlobalKeydown)
 })
 
 onUnmounted(() => {
@@ -731,6 +793,8 @@ onUnmounted(() => {
     clearInterval(loadingCheckTimer)
     loadingCheckTimer = null
   }
+  // Sprint 7: cmd+K
+  window.removeEventListener('keydown', onGlobalKeydown)
 })
 </script>
 
@@ -899,6 +963,23 @@ onUnmounted(() => {
   text-align: center;
   border: 1px solid var(--bg-primary, #0f172a);
 }
+
+/* Sprint 7: 搜索 + 时间线按钮 */
+.top-indicator-search { border-color: rgba(99,102,241,0.25); background: rgba(99,102,241,0.06); }
+.top-indicator-search .el-icon { color: #818cf8; }
+.top-indicator-search:hover { border-color: rgba(99,102,241,0.6); background: rgba(99,102,241,0.15); }
+.top-ind-kbd {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+  font-family: inherit;
+}
+.top-indicator-timeline { border-color: rgba(34,197,94,0.2); background: rgba(34,197,94,0.04); }
+.top-indicator-timeline .el-icon { color: #4ade80; }
+.top-indicator-timeline:hover { border-color: rgba(34,197,94,0.5); background: rgba(34,197,94,0.12); }
 
 /* 自定义布局按钮 */
 .top-layout-btn {

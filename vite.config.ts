@@ -101,6 +101,16 @@ export default defineConfig(({ mode }) => {
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
         },
+        '/api/search': {
+          // 全局搜索 API（端口 31002, Sprint 7）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
+        '/api/activity-timeline': {
+          // 活动时间线 API（端口 31002, Sprint 7）
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
+        },
         '/api/upload-image': {
           // 图片上传 API (端口 31002, REC-093)
           target: `http://localhost:${backendPort}`,
