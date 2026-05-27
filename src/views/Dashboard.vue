@@ -427,6 +427,9 @@
     />
     <ActivityTimelineDialog v-model="activityTimelineVisible" />
 
+    <!-- Sprint 9: #6 快捷消息发送 FAB（Floating Action Button 浮动操作按钮）-->
+    <QuickMsgFab />
+
     <!-- REC-011: 加载超时提示 -->
     <el-alert
       v-if="loadingHintVisible"
@@ -461,6 +464,7 @@ import ProjectBoardDialog from '../components/ProjectBoardDialog.vue'
 import CronCenterDialog from '../components/CronCenterDialog.vue'
 import CommandPaletteDialog from '../components/CommandPaletteDialog.vue'
 import ActivityTimelineDialog from '../components/ActivityTimelineDialog.vue'
+import QuickMsgFab from '../components/QuickMsgFab.vue'
 import { useLayoutSettings } from '../composables/useLayoutSettings'
 import { type WorkflowData } from '../data/workflow-steps'
 import {
